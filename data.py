@@ -1,8 +1,9 @@
+import os
 from os.path import join
 import torch
 from tokenizers import BPETokenizer
 
-def get_tokenizer(data_path, tokenize):
+def get_tokenizer(data_path, tokenize, vocab_size):
     if not tokenize:
         return BPETokenizer(join(data_path, "tokenizer-vocab.json"),
                             join(data_path, "tokenizer-merges.txt"))
@@ -12,7 +13,7 @@ def get_tokenizer(data_path, tokenize):
             join(data_path, 'valid.txt'),
             join(data_path, 'test.txt')
         ],
-        vocab_size=20000,
+        vocab_size=vocab_size,
         min_frequency=2,
         show_progress=True,
         special_tokens=["<s>", "<pad>", "</s>"],
@@ -23,25 +24,20 @@ def get_tokenizer(data_path, tokenize):
 def _tokenize(text_path, tokenizer):
     """Tokenizes a text file."""
     with open(text_path, 'r', encoding="utf8") as f:
-        ids = [ e.ids for e in tokenizer.encode_batch(f.readlines()) ]
+        ids = tokenizer.encode(". ".join(f.readlines())).ids
+    print ("{:<30}, Nb tokens: {} ".format(text_path, len(ids)))
     return torch.LongTensor(ids)
 
 class Corpus:
-    def __init__(self, data_path):
+    def __init__(self, data_path, tokenize, vocab_size):
         assert os.path.exists(data_path)
-        self.tokenizer = get_tokenizer(data_path, True)
+        tokenizer = get_tokenizer(data_path, tokenize, vocab_size)
         self.train = _tokenize(os.path.join(data_path, 'train.txt'),
-                               self.tokenizer)
+                               tokenizer)
         self.valid = _tokenize(os.path.join(data_path, 'valid.txt'),
-                               self.tokenizer)
+                               tokenizer)
         self.test = _tokenize(os.path.join(data_path, 'test.txt'),
-                              self.tokenizer)
-
-    @property
-    def vocab_size(self):
-        # temporary
-        return 20000
-
+                              tokenizer)
 
 def _batchify(data_tensor, batch_size):
     nb_batches = data_tensor.size(0) // batch_size
@@ -50,8 +46,7 @@ def _batchify(data_tensor, batch_size):
     data_tensor = data_tensor.view(batch_size, -1).contiguous()
     return data_tensor
 
-
-def _build_corpus(data_path, env_params):
+def _build_corpus(data_path, tokenize, vocab_size, env_params):
     # save the corpus to a file so that it's faster next time
     corpus_path = os.path.join(data_path, 'corpus.pt')
     if os.path.exists(corpus_path):
@@ -62,7 +57,7 @@ def _build_corpus(data_path, env_params):
         if env_params['distributed']:
             # only one process need to create a corpus file
             if env_params['rank'] == 0:
-                corpus = Corpus(data_path)
+                corpus = Corpus(data_path, tokenize, vocab_size)
                 torch.save(corpus, corpus_path)
                 # sync with other processes
                 torch.distributed.broadcast(torch.zeros(1).cuda(), src=0)
@@ -72,10 +67,9 @@ def _build_corpus(data_path, env_params):
                 torch.distributed.broadcast(torch.zeros(1).cuda(), src=0)
                 corpus = torch.load(corpus_path)
         else:
-            corpus = Corpus(data_path)
+            corpus = Corpus(data_path, tokenize, vocab_size)
             torch.save(corpus, corpus_path)
     return corpus
-
 
 def _get_train_val_test_data(corpus, batch_size):
     return [
@@ -84,10 +78,8 @@ def _get_train_val_test_data(corpus, batch_size):
         _batchify(corpus.test, batch_size)
     ]
 
-
 def get_train_val_test_data(data_params, env_params, batch_size, device):
     corpus = _build_corpus(**data_params, env_params=env_params)
-    data_params['vocab_size'] = corpus.vocab_size
     train_data, val_data, test_data = _get_train_val_test_data(
         corpus=corpus, batch_size=batch_size)
 

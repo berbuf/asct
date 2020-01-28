@@ -24,13 +24,13 @@ from utils import (
     save_checkpoint,
     Logger)
 
-
 def launch(env_params,
            model_params,
            adapt_span_params,
            optim_params,
            data_params,
            trainer_params):
+
     # ENVIRONMENT (device, distributed, etc.)
     set_up_env(env_params)
     device = env_params['device']
