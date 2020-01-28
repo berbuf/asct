@@ -1,60 +1,46 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-#
-
-#!/usr/bin/env python3
-
-import os
+from os.path import join
 import torch
+from tokenizers import BPETokenizer
 
+def get_tokenizer(data_path, tokenize):
+    if not tokenize:
+        return BPETokenizer(join(data_path, "tokenizer-vocab.json"),
+                            join(data_path, "tokenizer-merges.txt"))
+    tokenizer = BPETokenizer()
+    tokenizer.train([
+            join(data_path, 'train.txt'),
+            join(data_path, 'valid.txt'),
+            join(data_path, 'test.txt')
+        ],
+        vocab_size=20000,
+        min_frequency=2,
+        show_progress=True,
+        special_tokens=["<s>", "<pad>", "</s>"],
+    )
+    tokenizer.save(data_path, "tokenizer")
+    return tokenizer
 
-def _tokenize(text_path, dictionary_to_update):
+def _tokenize(text_path, tokenizer):
     """Tokenizes a text file."""
-    print('Tokenizing {}'.format(text_path))
-    assert os.path.exists(text_path)
-
-    nb_tokens_in_dictionary = len(dictionary_to_update)
-
-    # Count nb of tokens in text and update the dictionary
     with open(text_path, 'r', encoding="utf8") as f:
-        for line in f:
-            tokens = line.split() + ['<eos>']
-            for token in tokens:
-                if token not in dictionary_to_update:
-                    dictionary_to_update[token] = nb_tokens_in_dictionary
-                    nb_tokens_in_dictionary += 1
-
-    # Assign to each token its identifier
-    ids = []
-    with open(text_path, 'r', encoding="utf8") as f:
-        for line in f:
-            tokens = line.split() + ['<eos>']
-            for token in tokens:
-                ids.append(dictionary_to_update[token])
-    ids = torch.LongTensor(ids)
-
-    return ids
-
+        ids = [ e.ids for e in tokenizer.encode_batch(f.readlines()) ]
+    return torch.LongTensor(ids)
 
 class Corpus:
     def __init__(self, data_path):
-        self._dictionary = {}
-        self.train = _tokenize(
-            text_path=os.path.join(data_path, 'train.txt'),
-            dictionary_to_update=self._dictionary)
-        self.valid = _tokenize(
-            text_path=os.path.join(data_path, 'valid.txt'),
-            dictionary_to_update=self._dictionary)
-        self.test = _tokenize(
-            text_path=os.path.join(data_path, 'test.txt'),
-            dictionary_to_update=self._dictionary)
+        assert os.path.exists(data_path)
+        self.tokenizer = get_tokenizer(data_path, True)
+        self.train = _tokenize(os.path.join(data_path, 'train.txt'),
+                               self.tokenizer)
+        self.valid = _tokenize(os.path.join(data_path, 'valid.txt'),
+                               self.tokenizer)
+        self.test = _tokenize(os.path.join(data_path, 'test.txt'),
+                              self.tokenizer)
 
     @property
     def vocab_size(self):
-        return len(self._dictionary)
+        # temporary
+        return 20000
 
 
 def _batchify(data_tensor, batch_size):
@@ -116,7 +102,6 @@ def get_train_val_test_data(data_params, env_params, batch_size, device):
         val_data = val_data[slice_data]
         test_data = test_data[slice_data]
 
-    train_data = train_data.to(device)
-    val_data = val_data.to(device)
-    test_data = test_data.to(device)
-    return train_data, val_data, test_data
+    return (train_data.to(device),
+            val_data.to(device),
+            test_data.to(device))
