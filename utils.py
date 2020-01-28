@@ -14,7 +14,6 @@ import argparse
 import torch
 from adagrad_with_grad_clip import AdagradWithGradClip
 
-
 def _parse_args(params_config, args):
     parser = argparse.ArgumentParser()
     for params_category in params_config:  # e.g., 'model_params'
@@ -22,7 +21,6 @@ def _parse_args(params_config, args):
             # e.g., param_flag = '--block-sz'
             parser.add_argument(param_flag, **param_config)
     return parser.parse_args(args)
-
 
 def get_params(params_config, args=None):
     namespace = _parse_args(params_config, args)
@@ -34,7 +32,6 @@ def get_params(params_config, args=None):
         }
         for params_category in params_config
     }
-
 
 ##############################################################################
 # ENVIRONMENT
@@ -62,7 +59,6 @@ def set_up_env(env_params):
                 local_rank=env_params['local_rank']))
     env_params['device'] = torch.device('cuda')
 
-
 ##############################################################################
 # OPTIMIZER AND SCHEDULER
 ##############################################################################
@@ -76,7 +72,6 @@ def _get_grad_requiring_params(model):
             grad_requiring_params.append(param)
     print('nb_parameters={:.2f}M'.format(nb_parameters / 1e6))
     return grad_requiring_params
-
 
 def _get_optimizer(model,
                    optim,
@@ -95,13 +90,11 @@ def _get_optimizer(model,
         raise RuntimeError("wrong type of optimizer "
                            "- must be 'sgd' or 'adagrad")
 
-
 def _get_scheduler(optimizer, lr_warmup):
     if lr_warmup > 0:
         return torch.optim.lr_scheduler.LambdaLR(
             optimizer, lambda ep: min(1, ep / lr_warmup))
     return None
-
 
 def get_optimizer_and_scheduler(model, optim_params):
     optimizer = _get_optimizer(model=model,
@@ -112,7 +105,6 @@ def get_optimizer_and_scheduler(model, optim_params):
     scheduler = _get_scheduler(optimizer=optimizer,
                                lr_warmup=optim_params['lr_warmup'])
     return optimizer, scheduler
-
 
 ##############################################################################
 # CHECKPOINT
@@ -136,7 +128,6 @@ def _load_checkpoint(checkpoint_path, model, optimizer, scheduler, logger,
         scheduler.step(checkpoint_state['scheduler_iter'])
     return iter_init
 
-
 def load_checkpoint(checkpoint_path, model, optimizer, scheduler, logger,
                     distributed):
     if checkpoint_path and os.path.exists(checkpoint_path):
@@ -147,7 +138,6 @@ def load_checkpoint(checkpoint_path, model, optimizer, scheduler, logger,
                                 logger=logger,
                                 distributed=distributed)
     return 0
-
 
 def save_checkpoint(checkpoint_path, iter_no, model,
                     optimizer, scheduler, logger):
@@ -161,7 +151,6 @@ def save_checkpoint(checkpoint_path, iter_no, model,
         if scheduler is not None:
             checkpoint_state['scheduler_iter'] = scheduler.last_epoch
         torch.save(checkpoint_state, checkpoint_path)
-
 
 ##############################################################################
 # LOGGER

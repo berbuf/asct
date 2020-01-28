@@ -1,14 +1,6 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-#
-
 #!/usr/bin/env python3
 
 from torch.optim import Adagrad
-
 
 def _clip_grad(clr, grad, group_grad_clip):
     if group_grad_clip > 0:
@@ -16,7 +8,6 @@ def _clip_grad(clr, grad, group_grad_clip):
         if norm > group_grad_clip:
             clr *= group_grad_clip / (norm + 1e-10)
     return clr
-
 
 class AdagradWithGradClip(Adagrad):
     """Adagrad algoritm with custom gradient clipping"""
@@ -40,39 +31,31 @@ class AdagradWithGradClip(Adagrad):
         loss = None
         if closure is not None:
             loss = closure()
-
         for group in self.param_groups:
             for p in group['params']:
                 if p.grad is None:
                     continue
-
                 grad = p.grad.data
                 state = self.state[p]
-
                 state['step'] += 1
-
                 if group['weight_decay'] != 0:
                     if p.grad.data.is_sparse:
                         raise RuntimeError("weight_decay option is "
                                            "not compatible with sparse "
                                            "gradients")
                     grad = grad.add(group['weight_decay'], p.data)
-
                 clr = (group['lr'] /
                        (1 + (state['step'] - 1) * group['lr_decay']))
-
                 # clip
                 clr = _clip_grad(clr=clr,
                                  grad=grad,
                                  group_grad_clip=group['grad_clip'])
-
                 if grad.is_sparse:
                     # the update is non-linear so indices must be unique
                     grad = grad.coalesce()
                     grad_indices = grad._indices()
                     grad_values = grad._values()
                     size = grad.size()
-
                     def make_sparse(values):
                         constructor = grad.new
                         if grad_indices.dim() == 0 or values.dim() == 0:
@@ -86,5 +69,4 @@ class AdagradWithGradClip(Adagrad):
                     state['sum'].addcmul_(1, grad, grad)
                     std = state['sum'].sqrt().add_(1e-10)
                     p.data.addcdiv_(-clr, grad, std)
-
         return loss
