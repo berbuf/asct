@@ -8,7 +8,7 @@ import torch
 from config import PARAMS_CONFIG
 from data import get_train_val_test_data
 from models import TransformerSeq
-from trainer import train_iteration, full_eval, get_cache
+from trainer import train_iteration, full_eval
 from utils import (
     get_params,
     set_up_env,
@@ -17,22 +17,29 @@ from utils import (
     save_checkpoint,
     Logger)
 
-def eval_only(model_params, env_params, model, optimizer,
-              scheduler, val_data, test_data, device):
+def eval_only(model_params,
+              env_params,
+              model,
+              optimizer,
+              scheduler,
+              val_data,
+              test_data,
+              device):
+    distributed = env_params['distributed']
     # evaluate the model on test data
     with torch.no_grad():
         loss_val = full_eval(model=model,
-                             optimizer=optimize,
+                             optimizer=optimizer,
                              scheduler=scheduler,
                              data=val_data,
                              block_size=model_params['block_size'],
-                             hidden_size=model_params['hiden_size'])
+                             hidden_size=model_params['hidden_size'])
         loss_test = full_eval(model=model,
-                              optimizer=optimize,
+                              optimizer=optimizer,
                               scheduler=scheduler,
                               data=test_data,
                               block_size=model_params['block_size'],
-                              hidden_size=model_params['hiden_size'])
+                              hidden_size=model_params['hidden_size'])
         # collect results
         if distributed:
             stats = torch.tensor([loss_val, loss_test]).to(device)
@@ -45,8 +52,17 @@ def eval_only(model_params, env_params, model, optimizer,
         print('val: {:.3f}bpc'.format(loss_val / math.log(2)))
         print('test: {:.3f}bpc'.format(loss_test / math.log(2)))
 
-def train_only(model_params, train_params, env_params, model, optimizer,
-               scheduler, val_data, train_data, device, logger):
+def train_only(model_params,
+               train_params,
+               env_params,
+               model,
+               optimizer,
+               scheduler,
+               val_data,
+               train_data,
+               device,
+               logger):
+    distributed = env_params['distributed']
     # position of current batch
     data_pos = [0] * 2
     # initialize caches for train and valid
@@ -103,9 +119,9 @@ def train_only(model_params, train_params, env_params, model, optimizer,
 def launch(env_params, model_params, adapt_span_params,
            optim_params, data_params, trainer_params):
     # env (device, distributed, etc.)
+    distributed = env_params['distributed']
     set_up_env(env_params)
     device = env_params['device']
-    distributed = env_params['distributed']
     # data
     train_data, val_data, test_data = get_train_val_test_data(
         data_params=data_params,
@@ -130,7 +146,7 @@ def launch(env_params, model_params, adapt_span_params,
         model = torch.nn.parallel.DistributedDataParallel(
             model, device_ids=[local_rank], output_device=local_rank)
     else:
-        model = torch.nn.DataParallel(model)
+        #model = torch.nn.DataParallel(model)
         model = model.to(device)
     # optimizer, scheduler
     optimizer, scheduler = get_optimizer_and_scheduler(
@@ -143,9 +159,25 @@ def launch(env_params, model_params, adapt_span_params,
         logger, distributed)
     # iter
     if trainer_params['full_eval_mode']:
-        eval_only()
+        eval_only(model_params,
+                  env_params,
+                  model,
+                  optimizer,
+                  scheduler,
+                  val_data,
+                  test_data,
+                  device)
     else:
-        train_only()
+        train_only(model_params,
+                   train_params,
+                   env_params,
+                   model,
+                   optimizer,
+                   scheduler,
+                   val_data,
+                   train_data,
+                   device,
+                   logger)
 
 if __name__ == '__main__':
     launch(**get_params(params_config=PARAMS_CONFIG))

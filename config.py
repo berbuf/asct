@@ -1,10 +1,3 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-#
-
 #!/usr/bin/env python3
 
 # command-line arguments with their default values
@@ -31,7 +24,6 @@ PARAMS_CONFIG = {
         '--data': {
             'type': str,
             'default': 'data/wikitext-2',
-
             'help': 'data location '
                     '(must contain train.txt, valid.txt and test.txt)',
             'dest': 'data_path'
@@ -65,7 +57,7 @@ PARAMS_CONFIG = {
         },
         '--nlayers': {
             'type': int,
-            'default': 8,
+            'default': 1,
             'help': 'number of layers',
             'dest': 'nb_layers'
         },
@@ -78,13 +70,13 @@ PARAMS_CONFIG = {
         },
         '--nheads': {
             'type': int,
-            'default': 2,
+            'default': 1,
             'help': 'number of self-attention heads',
             'dest': 'nb_heads'
         },
         '--attn-span': {
             'type': int,
-            'default': 32,
+            'default': 64,
             'help': 'length of the attention span',
             'dest': 'attn_span'
         },
@@ -95,12 +87,12 @@ PARAMS_CONFIG = {
                     'to avoid storing gradients',
             'dest': 'rev_net'
         },
-        '--cache-block': {
+        '--discriminator': {
             'action': 'store_true',
-            'default': True,
-            'help': 'activate cahing previous block '
-                    '(Transformer XL)',
-            'dest': 'cache_block'
+            'default': False,
+            'help': 'activate discriminator loss'
+                    '(Electra)',
+            'dest': 'discriminator'
         },
         '--dropout': {
             'type': float,
@@ -188,7 +180,7 @@ PARAMS_CONFIG = {
     'adapt_span_params': {
         '--adapt-span': {
             'action': 'store_true',
-            'default': True,
+            'default': False,
             'help': 'enable adaptive attention span',
             'dest': 'adapt_span_enabled'
         },
