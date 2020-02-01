@@ -7,7 +7,7 @@ import torch
 
 from config import PARAMS_CONFIG
 from data import get_train_val_test_data
-from models import TransformerSeq
+from models import Transformer
 from trainer import train_iteration, full_eval
 from utils import (
     get_params,
@@ -136,7 +136,7 @@ def launch(env_params, model_params, adapt_span_params,
         print('trainer_params:\t', trainer_params)
         print('adapt_span_params:\t', adapt_span_params)
     # model
-    model = TransformerSeq(
+    model = Transformer(
         vocab_size=data_params['vocab_size'], **model_params,
         adapt_span_params=adapt_span_params)
     # distribute

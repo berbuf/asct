@@ -45,26 +45,41 @@ def _unskew(X):
 def _span_slice(X, span):
     """ get slices of X according to span """
     B, M, H = X.size()
-    # window values
-    s1 = span[:,:,0].max()
-    s2 = span[:,:,1].max()
-    max_left = max(s1, -s2).round().int().item()
-    max_right = max(-s1, s2).round().int().item()
-    max_span = ((span[:,:,0] + span[:,:,1])
-                .max().round().int().item()) + 1 # central token
-    # maximum slice window for each token
-    idx_span = (torch.arange(max_span).reshape(max_span, -1)
-                .expand(-1, M).transpose(0, 1))
-    # skew rows
-    idx_span = idx_span + torch.arange(M).reshape(M,-1)
-    # extract indexes to third dim
-    key_span = F.pad(X, (0, 0, max_left, max_right))
-    key_span = key_span[:,idx_span].reshape(B, M, -1, H)
-    return key_span
 
-class SeqAttention(nn.Module):
-    """Sequential self-attention layer.
-    """
+    # window informations
+    left_bound = (torch.max(span[:,:,0], -span[:,:,1])
+                  .unsqueeze(2).round().int())
+    right_bound = (torch.max(span[:,:,0], -span[:,:,1])
+                   .unsqueeze(2).round().int())
+    max_span = ((left_bound + right_bound)
+                .abs().max().long().item()) + 1 # central token
+
+    # basic span index of max_span size
+    idx_span = ((torch.arange(max_span)
+                 # one idx for each token
+                 .unsqueeze(1).expand(-1, B * M)
+                 # format to rows
+                 .transpose(0, 1).view(B, M, max_span)
+                 # align index with current token
+                 + torch.arange(M).unsqueeze(1))
+                # align index with actual span start for each token
+                .cuda() - left_bound)
+
+    # index out of window indexes to idx_pad 
+    idx_pad = M
+    idx_span[idx_span < 0] = idx_pad
+    right_mask = (right_bound + torch.arange(M).unsqueeze(1).cuda())
+    idx_span[idx_span > right_mask] = idx_pad
+
+    # extract indexes and project values to third dim
+    key_span = F.pad(X, (0, 0, 0, 1))
+    return (key_span
+            .view(-1, H)[idx_span.view(-1, max_span)]
+            .view(B, M, max_span, H)
+            .contiguous())
+
+class SelfAttention(nn.Module):
+    """ """
     def __init__(self, hidden_size, attn_span,
                  dropout, adapt_span_params, **kargs):
         nn.Module.__init__(self)
@@ -89,6 +104,8 @@ class SeqAttention(nn.Module):
 
         # Query * Key^T
         K = _span_slice(key, span)
+        print (query.view(B, M, 1, H).shape)
+        print (K.shape)
         attn_cont = (torch.matmul(
             query.view(B, M, 1, H), K.transpose(-1, -2))
                      .reshape(B, M, -1)) # B, M, S
@@ -124,13 +141,13 @@ class SeqAttention(nn.Module):
         else:
             return self.attn_span
 
-class MultiHeadSeqAttention(nn.Module):
+class MultiHeadSelfAttention(nn.Module):
     def __init__(self, hidden_size, nb_heads, **kargs):
         nn.Module.__init__(self)
         assert hidden_size % nb_heads == 0
         self.nb_heads = nb_heads
         self.head_dim = hidden_size // nb_heads
-        self.attn = SeqAttention(
+        self.attn = SelfAttention(
             hidden_size=self.head_dim, nb_heads=nb_heads, **kargs)
         self.proj_query = nn.Linear(hidden_size, hidden_size, bias=False)
         self.proj_out = nn.Linear(hidden_size, hidden_size, bias=False)
@@ -179,10 +196,10 @@ class FeedForwardLayer(nn.Module):
         h2 = self.fc2(h1)
         return h2
 
-class TransformerSeqLayer(nn.Module):
+class TransformerLayer(nn.Module):
     def __init__(self, hidden_size, **kargs):
         nn.Module.__init__(self)
-        self.attn = MultiHeadSeqAttention(hidden_size=hidden_size, **kargs)
+        self.attn = MultiHeadSelfAttention(hidden_size=hidden_size, **kargs)
         self.ff = FeedForwardLayer(hidden_size=hidden_size, **kargs)
         self.norm1 = nn.LayerNorm(hidden_size)
         self.norm2 = nn.LayerNorm(hidden_size)
@@ -205,7 +222,7 @@ class SideRevNet(nn.Module):
         x = F.gelu(x)
         return x
 
-class TransformerSeq(nn.Module):
+class Transformer(nn.Module):
     def __init__(self, vocab_size, hidden_size, nb_heads, nb_layers,
                  attn_span, rev_net, **kargs):
         nn.Module.__init__(self)
@@ -222,9 +239,9 @@ class TransformerSeq(nn.Module):
                                      split_along_dim=-1))
         # transformer layers
         self.layers = nn.ModuleList([
-            rev_block(TransformerSeqLayer(hidden_size=hidden_size,
-                                nb_heads=nb_heads,                
-                                attn_span=attn_span, **kargs))
+            rev_block(TransformerLayer(hidden_size=hidden_size,
+                                       nb_heads=nb_heads,                
+                                       attn_span=attn_span, **kargs))
             for _ in range(nb_layers) ])
         if rev_net:
             self.layers = ReversibleSequence(self.layers)
