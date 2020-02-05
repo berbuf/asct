@@ -49,23 +49,12 @@ def _slice(key, key_pe, span, idx_template, align):
     
     # key
     key = F.pad(key, (0, 0, 0, 1))
-    calc_time(lambda: (key.view(-1, H)[idx_span]
-                       .view(B, M, max_span, H)
-                       .transpose(-1, -2)
-                       .view(B * M, H, max_span)), "key")
-    
     key = (key.view(-1, H)[idx_span]
            .view(B, M, max_span, H)
            .transpose(-1, -2)
            .view(B * M, H, max_span))
 
     # key_pe
-    calc_time(lambda: (F.pad(key_pe.repeat(B, 1, 1).transpose(-1, -2), (0, 0, 0, 1))
-                       .view(-1, H)[idx_span]
-                       .view(B, M, max_span, H)
-                       .transpose(-1, -2)
-                       .view(B * M, H, max_span)), "key_pe")
-
     key_pe = key_pe.repeat(B, 1, 1).transpose(-1, -2)
     key_pe = F.pad(key_pe, (0, 0, 0, 1))
     key_pe = (key_pe.view(-1, H)[idx_span]
@@ -81,12 +70,8 @@ def scaling(query, key, value, key_pe, span, idx_template, align):
     # slices
     key, key_pe = _slice(key, key_pe, span, idx_template, align)
 
-
     query = query.view(B*M, 1, H)
 
-    #print (query.shape)
-    #print (key.shape)
-    #print (key_pe.shape)
     attn_cont = torch.bmm(query, key).view(B, M, -1)
     attn_pos = torch.bmm(query, key_pe).view(B, M, -1)
     attn = attn_cont + attn_pos
@@ -95,11 +80,6 @@ def scaling(query, key, value, key_pe, span, idx_template, align):
     attn = F.softmax(attn, dim=-1)
 
     out = torch.mul(attn.unsqueeze(3), value.unsqueeze(2)).sum(2)
-
-    calc_time(lambda:
-              (torch.bmm(query, key).view(B, M, -1),
-               torch.bmm(query, key_pe).view(B, M, -1),
-               torch.mul(attn.unsqueeze(3), value.unsqueeze(2)).sum(2)), "bmm")
 
     return out
 
@@ -112,7 +92,7 @@ def adaptive(query, key, value, key_pe, adaptive_span):
     # useless without cache
     a = _unskew(attn_cont)
 
-    attn_pos = torch.matmul(query, key_pe)
+    attn_pos = torch.matmul(query, key_pe.transpose(-1, -2))
     attn = attn_cont + attn_pos
 
     attn = attn / math.sqrt(H)
@@ -125,37 +105,70 @@ def adaptive(query, key, value, key_pe, adaptive_span):
     out = torch.matmul(attn, value)
     return a, b, x, y, z, t, out
 
+def scale(key, key_pe, span, idx_template):
+    B,M,H=key.size()
+
+    left_bound = span[:,:,0].round().long()
+    right_bound = span[:,:,1].round().long()
+
+    max_left = left_bound.max().item()
+    max_right = right_bound.max().item()
+    
+    key = F.pad(key, (0, 0, max_left, max_right))
+    key_pe = F.pad(key, (0, 0, max_left, max_right))
+
+    idx_span = idx_template[:,:,:max_left + 1 + max_right ]
+    
+    key_span = key.view(-1, H)[idx_span]
+
+    key_pe = key_pe.repeat(B, 1, 1)
+    key_pe_span = key_pe.view(-1, H)[idx_span]
+    
+    return key, key_pe
+
+def scaling2(query, key, value, key_pe, span, idx_template):
+    # key = B X M X H
+
+    # key = B X M X L X H
+    key, key_pe = scale(key, key_pe, span, idx_template)
+    
+
+    return
+
 def main():
-    B,M,H=64,256,1024
-    #B,M,H=8,16,128
+    #B,M,H=64,256,1024
+    B,M,H=8,16,128
     limit_span=50
 
     torch.manual_seed(42)
 
     adaptive_span = AdaptiveSpan(attn_span=M, adapt_span_loss=0, adapt_span_ramp=32,
                                  adapt_span_init=0, adapt_span_cache=False, nb_heads=1)
-    query = torch.FloatTensor(B*M*H).uniform_(0, 1).reshape(B, M, H).cuda()
-    key = torch.FloatTensor(B*M*H).uniform_(0, 1).reshape(B, M, H).cuda()
-    value = torch.FloatTensor(B*M*H).uniform_(0, 1).reshape(B, M, H).cuda()
-    key_pe = torch.FloatTensor(M*H).uniform_(0, 1).reshape(1, H, M).cuda()
-    span = torch.FloatTensor(B*M*2).uniform_(0, 1).reshape(B, M, 2).cuda() * 10 - 5
+    query = torch.FloatTensor(B*M*H).uniform_(0, 1).reshape(B, M, H)#.cuda()
+    key = torch.FloatTensor(B*M*H).uniform_(0, 1).reshape(B, M, H)#.cuda()
+    value = torch.FloatTensor(B*M*H).uniform_(0, 1).reshape(B, M, H)#.cuda()
+    #key_pe = torch.FloatTensor(M*H).uniform_(0, 1).reshape(1, H, M)#.cuda()
+    key_pe = torch.FloatTensor(M*H).uniform_(0, 1).reshape(1, M, H)#.cuda()
+    span = torch.FloatTensor(B*M*2).uniform_(0, 1).reshape(B, M, 2) * 10 - 5#.cuda() * 10 - 5
+    span = span.abs()
     # basic span index of max_span size
     idx_template = (torch.arange(limit_span)
                     # one idx for each token
                     .unsqueeze(1).repeat(B * M, 1)
                     # format to rows
                     .transpose(0, 1).view(B, M, limit_span)
-                    .cuda())
-    align = torch.arange(M).unsqueeze(1).cuda()
+                    + torch.arange(M).unsqueeze(1))
+                    #.cuda())
+    #align = torch.arange(M).unsqueeze(1)#.cuda()
 
     adaptive(query, key, value, key_pe, adaptive_span)
-    scaling(query, key, value, key_pe, span, idx_template, align)
-    
+    scaling2(query, key, value, key_pe, span, idx_template)
+
     # test
     for _ in range(100):
         calc_time(lambda: adaptive(query, key, value, key_pe, adaptive_span), "adaptive")
-        #calc_time(lambda: scaling(query, key, value, key_pe, span, idx_template, align), "scaling")
-        scaling(query, key, value, key_pe, span, idx_template, align)
+        calc_time(lambda: scaling2(query, key, value, key_pe, span, idx_template), "scaling")
+        
 
 
 def res():
@@ -170,5 +183,5 @@ def res():
     for n in res:
         print (n, sum(res[n]) / len(res[n]))
 
-#main()
-res()
+main()
+#res()
