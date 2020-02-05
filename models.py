@@ -42,41 +42,61 @@ def _unskew(X):
     X = X[:, :, :L]  # B x M x L
     return X
 
-def _span_slice(X, span):
-    """ get slices of X according to span """
-    B, M, H = X.size()
-
+def _window(span):
     # window informations
     left_bound = (torch.max(span[:,:,0], -span[:,:,1])
                   .unsqueeze(2).round().int())
     right_bound = (torch.max(span[:,:,0], -span[:,:,1])
                    .unsqueeze(2).round().int())
     max_span = ((left_bound + right_bound)
-                .abs().max().long().item()) + 1 # central token
+            .abs().max().long().item()) + 1 # central token
+    return left_bound, right_bound, max_span
 
+def _idx_span(B, M, max_span):
     # basic span index of max_span size
-    idx_span = ((torch.arange(max_span)
-                 # one idx for each token
-                 .unsqueeze(1).expand(-1, B * M)
-                 # format to rows
-                 .transpose(0, 1).view(B, M, max_span)
-                 # align index with current token
-                 + torch.arange(M).unsqueeze(1))
-                # align index with actual span start for each token
-                .cuda() - left_bound)
+    return (torch.arange(max_span)
+            # one idx for each token
+            .unsqueeze(1).repeat(B * M, 1)
+            # format to rows
+            .transpose(0, 1).view(B, M, max_span).cuda())
 
-    # index out of window indexes to idx_pad 
-    idx_pad = M
+def _mask_idx(idx_span, left_bound, right_bound, align):
+    _, idx_pad, _ = idx_span.size()
+    # align index with current token
+    idx_span += align
+    # align index with actual span start for each token
+    idx_span -= left_bound
+    # index out of window indexes to idx_pad
     idx_span[idx_span < 0] = idx_pad
-    right_mask = (right_bound + torch.arange(M).unsqueeze(1).cuda())
+    right_mask = (right_bound + align)
     idx_span[idx_span > right_mask] = idx_pad
+    return idx_span
 
+def _extract(X, B, M, max_span, H, idx_span):
     # extract indexes and project values to third dim
-    key_span = F.pad(X, (0, 0, 0, 1))
-    return (key_span
+    X_span = F.pad(X, (0, 0, 0, 1))
+    return (X_span
             .view(-1, H)[idx_span.view(-1, max_span)]
-            .view(B, M, max_span, H)
-            .contiguous())
+            .view(B, M, max_span, H))
+
+def _slice(key, key_pe, span, align):
+    B,M,H=key.size()
+
+    # window info
+    left_bound, right_bound, max_span = _window(span)
+    idx_span = _idx_span(B, M, max_span)
+    idx_span = _mask_idx(idx_span, left_bound, right_bound, align)
+
+    # key
+    key_span = _extract(key, B, M, max_span, H, idx_span)
+    key_span = key_span.transpose(-1, -2).view(B*M, H, max_span)
+
+    # key_pe
+    key_pe = key_pe.repeat(B, 1, 1)
+    key_pe_span = _extract(key_pe, B, M, max_span, H, idx_span)
+    key_pe_span = key_pe_span.transpose(-1, -2).reshape(B*M, H, max_span)
+
+    return key_span, key_pe_span
 
 class SelfAttention(nn.Module):
     """ """
@@ -93,45 +113,20 @@ class SelfAttention(nn.Module):
                                               **adapt_span_params, **kargs)
 
     def forward(self, query, key, span, value, key_pe):
-        # query, key, value size = B x M x H
-        # key_pe = B x M x L
-        B, M, H = query.size()
+        B,M,H=key.size()
 
-        if self.adapt_span_enabled:
-            # [optional] trim out memory to reduce unnecessary computation
-            key, value, key_pe = self.adaptive_span.trim_memory(
-                query, key, value, key_pe)
+        # slices
+        key, key_span = _slice(key, key_pe, span, align)
 
-        # Query * Key^T
-        K = _span_slice(key, span)
-        print (query.view(B, M, 1, H).shape)
-        print (K.shape)
-        attn_cont = (torch.matmul(
-            query.view(B, M, 1, H), K.transpose(-1, -2))
-                     .reshape(B, M, -1)) # B, M, S
-        print (attn_cont.shape)
-
-        # compute attention from context
-        # B x M (dest) x (M) (src)
-        attn_cont = torch.matmul(query, key.transpose(-1, -2))
-
-        # attention probabilities
-        #attn_cont = _unskew(attn_cont)  # B x M x L
-
-        # compute the effect of position embedding
-        attn_pos = torch.matmul(query, key_pe)  # B x M x L_pos
+        query = query.view(B*M, 1, H)
+        attn_cont = torch.bmm(query, key).view(B, M, -1)
+        attn_pos = torch.bmm(query, key_span).view(B, M, -1)
         attn = attn_cont + attn_pos
 
-        attn = attn / math.sqrt(self.hidden_size)  # B x M X L_pos
+        attn = attn / math.sqrt(H)
         attn = F.softmax(attn, dim=-1)
 
-        if self.adapt_span_enabled:
-            # trim attention lengths according to the learned span
-            attn = self.adaptive_span(attn)
-        attn = self.dropout(attn)  # B x M X L_pos
-
-        #attn_cont = _skew(attn, 0)  # B x M X (L+M)
-        out = torch.matmul(attn_cont, value)  # B x M x H
+        out = torch.mul(attn.unsqueeze(3), value.unsqueeze(2)).sum(2)
 
         return out
 

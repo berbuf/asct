@@ -45,7 +45,7 @@ PARAMS_CONFIG = {
     'model_params': {
         '--hid-sz': {
             'type': int,
-            'default': 256,
+            'default': 1024,
             'help': 'hidden size (i.e. model size)',
             'dest': 'hidden_size'
         },
@@ -63,7 +63,7 @@ PARAMS_CONFIG = {
         },
         '--block-sz': {
             'type': int,
-            'default': 64,
+            'default': 256,
             'help': 'block size '
                     '(the length of sequence to process in parallel)',
             'dest': 'block_size'
@@ -76,7 +76,7 @@ PARAMS_CONFIG = {
         },
         '--attn-span': {
             'type': int,
-            'default': 64,
+            'default': 256,
             'help': 'length of the attention span',
             'dest': 'attn_span'
         },
