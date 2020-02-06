@@ -6,10 +6,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from adaptive_span import AdaptiveSpan
-from models import _skew, _unskew
 
-# Reecrire en s'inspirant de adaptive
-
+# check cuda time
 def calc_time(fct, name):
     torch.cuda.synchronize()
     start = time.time()
@@ -19,6 +17,8 @@ def calc_time(fct, name):
     print(name, end - start)
     print ()
 
+##
+### SCALE WITH IDX
 def get_idx(span, idx_template, align):
     _,M,_=span.size()
     left_bound = (torch.max(span[:,:,0], -span[:,:,1])
@@ -55,7 +55,7 @@ def _slice(key, key_pe, span, idx_template, align):
            .view(B * M, H, max_span))
 
     # key_pe
-    key_pe = key_pe.repeat(B, 1, 1)#.transpose(-1, -2)
+    key_pe = key_pe.repeat(B, 1, 1).transpose(-1, -2)
     key_pe = F.pad(key_pe, (0, 0, 0, 1))
     key_pe = (key_pe.view(-1, H)[idx_span]
               .view(B, M, max_span, H)
@@ -64,7 +64,7 @@ def _slice(key, key_pe, span, idx_template, align):
 
     return key, key_pe
 
-def scaling(query, key, value, key_pe, span, idx_template, align):
+def scale_idx(query, key, value, key_pe, span, idx_template, align):
     B,M,H=query.size()
 
     # slices
@@ -83,6 +83,31 @@ def scaling(query, key, value, key_pe, span, idx_template, align):
 
     return out
 
+def _skew(X, pad_value):
+    """shift every row 1 step to right"""
+    """ realign values, pad non-relevant span values with pad_value"""
+    # X = B x M x L
+    B, M, L = X.size()
+    X = F.pad(X, (0, M + 1), value=pad_value)  # B x M x (L+M+1)
+    X = X.view(B, -1)  # B x LM+MM+M
+    X = X[:, :-M]  # B x LM+MM
+    X = X.view(B, M, L + M)  # B x M x L+M
+    return X
+
+def _unskew(X):
+    """reverse _skew operation"""
+    """ crop non-relevant span """
+    # X = B x M x L+M
+    B, M, L_M = X.size()
+    L = L_M - M
+    X = X.view(B, -1)  # B x LM+MM
+    X = F.pad(X, (0, M))  # B x LM+MM+M
+    X = X.view(B, M, L + M + 1)  # B x M x L+M+1
+    X = X[:, :, :L]  # B x M x L
+    return X
+
+##
+### ORIGINAL ADAPTIVE
 def adaptive(query, key, value, key_pe, adaptive_span):
     B,M,H=query.size()
 
@@ -92,7 +117,7 @@ def adaptive(query, key, value, key_pe, adaptive_span):
     # useless without cache
     a = _unskew(attn_cont)
 
-    attn_pos = torch.matmul(query, key_pe.transpose(-1, -2))
+    attn_pos = torch.matmul(query, key_pe)
     attn = attn_cont + attn_pos
 
     attn = attn / math.sqrt(H)
@@ -104,35 +129,9 @@ def adaptive(query, key, value, key_pe, adaptive_span):
     b = _skew(attn, 0)
     out = torch.matmul(attn, value)
     return a, b, x, y, z, t, out
-    
-def scale(key, key_pe, span):
-    B,M,H=key.size()
 
-    left_bound = span[:,:,0].max().round().long()
-    right_bound = span[:,:,1].max().round().long()
-
-    max_left = left_bound.item()
-    max_right = right_bound.item()
-    max_span = max_left + 1 + max_right
-    
-    key = F.pad(key, (0, 0, max_left, max_right))
-    key_pe = F.pad(key_pe, (0, 0, max_left, max_right))
-
-    return key, key_pe, max_span
-
-def scaling2(query, key, value, key_pe, span):
-    B,M,H=query.size()
-
-    # key = B X M X L X H
-    key, key_pe, max_span = scale(key, key_pe, span)
-    query = query.unsqueeze(2)
-    key = key.transpose(-1, -2)
-    a = torch.stack([ torch.matmul(query[:,N], key[:,:,N:max_span+N]) for N in range(M) ])
-
-    # B X M X H * B X L X H
-
-    return a
-
+##
+### SCALE WITH MASK
 class SelectAttention(nn.Module):
 
     def __init__(self, batch_size, n_heads, max_span):
@@ -144,7 +143,7 @@ class SelectAttention(nn.Module):
         mask = (torch.linspace(0, M - 1, M)
                 .repeat(B * M, 1)
                 .reshape(B // K, K, M, M)
-                - torch.arange(M).float().unsqueeze(1))
+                - torch.arange(M).float().unsqueeze(1)).cuda()
         self.register_buffer('mask', mask)
 
     def forward(self, attn, span):
@@ -164,7 +163,7 @@ class SelectAttention(nn.Module):
 
         return attn.reshape(B,M,M)
         
-def scaling3(query, key, value, key_pe, span, select):
+def scale_mask(query, key, value, key_pe, span, select):
     B,M,H=query.size()
     attn_cont = torch.matmul(query, key.transpose(-1, -2))
     attn_pos = torch.matmul(query, key_pe)
@@ -177,43 +176,58 @@ def scaling3(query, key, value, key_pe, span, select):
     return out
 
 def main():
-    #B,M,H=64,256,1024
-    B,K,M,H=8,2,16,128
+    B,K,M,H=64,2,256,1024
+    #B,K,M,H=8,2,16,128
     limit_span=50
 
     torch.manual_seed(42)
 
     adaptive_span = AdaptiveSpan(attn_span=M, adapt_span_loss=0, adapt_span_ramp=32,
                                  adapt_span_init=0, adapt_span_cache=False, nb_heads=1)
-    query = torch.FloatTensor(B*M*H).uniform_(0, 1).reshape(B, M, H)#.cuda()
-    key = torch.FloatTensor(B*M*H).uniform_(0, 1).reshape(B, M, H)#.cuda()
-    value = torch.FloatTensor(B*M*H).uniform_(0, 1).reshape(B, M, H)#.cuda()
-    key_pe = torch.FloatTensor(M*H).uniform_(0, 1).reshape(1, H, M)#.cuda()
+    query = torch.FloatTensor(B*M*H).uniform_(0, 1).reshape(B, M, H).cuda()
+    key = torch.FloatTensor(B*M*H).uniform_(0, 1).reshape(B, M, H).cuda()
+    value = torch.FloatTensor(B*M*H).uniform_(0, 1).reshape(B, M, H).cuda()
+    key_pe = torch.FloatTensor(M*H).uniform_(0, 1).reshape(1, H, M).cuda()
+
     # B_K, M, 2
     span = (torch.FloatTensor(B*M*2)
             .uniform_(0, 1)
-            .reshape(B, M, 2)*10 -5)#.cuda() * 10 - 5
+            .reshape(B, M, 2).cuda() * 10 - 5)
 
-    align = torch.arange(M).unsqueeze(1)#.cuda()
+    align = torch.arange(M).unsqueeze(1).cuda()
     # basic span index of max_span size
     idx_template = (torch.arange(limit_span)
                     # one idx for each token
                     .unsqueeze(1).repeat(B * M, 1)
                     # format to rows
                     .transpose(0, 1).view(B, M, limit_span)
-                    #.cuda()
+                    .cuda()
                     + align)
 
     select = SelectAttention(B, K, M)
-    #adaptive(query, key, value, key_pe, adaptive_span)
-    #scaling2(query, key, value, key_pe, span)
-    scaling3(query, key, value, key_pe, span, select)
-    return
+
+    adaptive(query, key, value, key_pe, adaptive_span)
+    scale_idx(query, key, value, key_pe, span, idx_template, align)
+    scale_mask(query, key, value, key_pe, span, select)
 
     # test
     for _ in range(100):
         calc_time(lambda: adaptive(query, key, value, key_pe, adaptive_span), "adaptive")
-        calc_time(lambda: scaling(query, key, value, key_pe, span, idx_template, align), "scaling")
-        calc_time(lambda: scaling2(query, key, value, key_pe, span), "scaling2")
+        calc_time(lambda: scale_idx(query, key, value, key_pe, span, idx_template, align), "scaling")
+        calc_time(lambda: scale_mask(query, key, value, key_pe, span, select), "scaling3")
+
+def res(f):
+    print (f)
+    l = [ e.split(" ") for e in open(f).readlines() if len(e) > 1]
+    
+    res = {}
+    for name, time in l:
+        if name not in res:
+            res[name] = []
+            res[name] += [float(time)]
+
+    for n in res:
+        print (n, sum(res[n]) / len(res[n]))
 
 main()
+#res("./res")

@@ -14,118 +14,76 @@ import torch.nn as nn
 import torch.nn.functional as F
 from revnet import ReversibleBlock, ReversibleSequence
 
-from adaptive_span import AdaptiveSpan
+#from adaptive_span import AdaptiveSpan
 
 # Size notations:
 # B = batch_size, H = hidden_size, M = block_size, L = attn_span
 
-def _skew(X, pad_value):
-    """shift every row 1 step to right"""
-    """ realign values, pad non-relevant span values with pad_value"""
-    # X = B x M x L
-    B, M, L = X.size()
-    X = F.pad(X, (0, M + 1), value=pad_value)  # B x M x (L+M+1)
-    X = X.view(B, -1)  # B x LM+MM+M
-    X = X[:, :-M]  # B x LM+MM
-    X = X.view(B, M, L + M)  # B x M x L+M
-    return X
+class SelectAttention(nn.Module):
 
-def _unskew(X):
-    """reverse _skew operation"""
-    """ crop non-relevant span """
-    # X = B x M x L+M
-    B, M, L_M = X.size()
-    L = L_M - M
-    X = X.view(B, -1)  # B x LM+MM
-    X = F.pad(X, (0, M))  # B x LM+MM+M
-    X = X.view(B, M, L + M + 1)  # B x M x L+M+1
-    X = X[:, :, :L]  # B x M x L
-    return X
+    def __init__(self, batch_size, n_heads, max_span):
+        nn.Module.__init__(self)
+        B, K, M = batch_size, n_heads, max_span
 
-class ScaleAttention(object):
-    def __init__(self, B, M, limit_span):
-        self.align = torch.arange(M).unsqueeze(1)
-        # basic span index of max_span size
-        self.idx_template = (torch.arange(limit_span)
-                             # one idx for each token
-                             .unsqueeze(1).repeat(B * M, 1)
-                             # format to rows
-                             .transpose(0, 1).view(B, M, limit_span))
+        self.n_heads = K
+        mask = (torch.linspace(0, M - 1, M)
+                .repeat(B * K * M, 1)
+                .reshape(B, K, M, M)
+                - torch.arange(M).float().unsqueeze(1)).cuda()
+        self.register_buffer('mask', mask)
+        self.soft = 2
 
-    def set_window(self, span):
-        B, M, _ = span.size()
+    def forward(self, attn, span):
+        (B,M,_), K = attn.size(), self.n_heads
+        
+        attn = attn.reshape(B//K, K, M, -1)
+        span = span.reshape(B//K, K, M, 2, 1)
+        
+        mean = span[:,:,:,1]
+        intercept = span[:,:,:,0]
+        """
+        print (attn.shape)
+        print (span.shape)
+        print (mean.shape)
+        print (intercept.shape)
+        print (self.mask.shape)
+        """
 
-        left_bound = (torch.max(span[:,:,0], -span[:,:,1])
-                      .unsqueeze(2).round().long())
-        right_bound = (torch.max(-span[:,:,0], span[:,:,1])
-                       .unsqueeze(2).round().long())
-        len_span = (left_bound + right_bound).abs() + 1 # central token
-        max_span = len_span.max()
+        # -((x+b)/soft)**2+a
+        z = -((self.mask - intercept) / self.soft)**2 + mean
+        z = z.clamp(0, 1)
 
-        # prepare idx_span
-        idx_span = self.idx_template[:,:,:max_span]
-        idx_span[:,:,] = self.align
+        attn = attn * z
 
-        # align right, negative values are out of windows
-        aligned_right = idx_span - (max_span - len_span)
-
-        # scale to real values, and align left
-        idx_span = (aligned_right + self.align - left_bound).flatten()
-
-        # flatten for speed up, assign M to out of window indexes
-        idx_span[(aligned_right.flatten() < 0) | (idx_span > M)] = M
-        idx_span = idx_span.view(-1, max_span)
-
-        return idx_span
-
-    def slice(self, key, key_pe, span):
-        B,M,H = query.size()
-
-        # return idx
-        max_span, idx_span = self.set_window(span)
-
-        # key
-        key = F.pad(key, (0, 0, 0, 1))
-        key = (key.view(-1, H)[idx_span]
-               .view(B, M, max_span, H)
-               .transpose(-1, -2)
-               .view(B * M, H, max_span))
-
-        # key_pe
-        key_pe = key_pe.repeat(B, 1, 1)#.transpose(-1, -2)
-        key_pe = F.pad(key_pe, (0, 0, 0, 1))
-        key_pe = (key_pe.view(-1, H)[idx_span]
-                  .view(B, M, max_span, H)
-                  .transpose(-1, -2)
-                  .view(B * M, H, max_span))
-
-        return key, key_pe
+        return attn.reshape(B,M,M)
 
 class SelfAttention(nn.Module):
     """ """
-    def __init__(self, hidden_size, attn_span,
-                 dropout, adapt_span_params, **kargs):
+    def __init__(self, dup_batch_size, hidden_size, block_size,
+                 dropout, nb_heads, **kargs):
         nn.Module.__init__(self)
         self.dropout = nn.Dropout(dropout)
         self.hidden_size = hidden_size # size of a single head
-        self.scale = ScaleAttention(attn_span)
+        # B K M
+        self.select = SelectAttention(dup_batch_size, nb_heads, block_size)
 
     def forward(self, query, key, span, value, key_pe):
         B,M,H=key.size()
 
-        # slices
-        key, key_span = _slice(key, key_pe, span, align)
-
-        query = query.view(B*M, 1, H)
-        attn_cont = torch.bmm(query, key).view(B, M, -1)
-        attn_pos = torch.bmm(query, key_span).view(B, M, -1)
+        attn_cont = torch.matmul(query, key.transpose(-1, -2))
+        attn_pos = torch.matmul(query, key_pe)
         attn = attn_cont + attn_pos
+
+        # select
+        attn = self.select(attn, span)
 
         attn = attn / math.sqrt(H)
         attn = F.softmax(attn, dim=-1)
 
-        out = torch.mul(attn.unsqueeze(3), value.unsqueeze(2)).sum(2)
-
+        attn = self.dropout(attn)
+        
+        out = torch.matmul(attn_cont, value)
+        
         return out
 
 class MultiHeadSelfAttention(nn.Module):
@@ -211,14 +169,14 @@ class SideRevNet(nn.Module):
 
 class Transformer(nn.Module):
     def __init__(self, vocab_size, hidden_size, nb_heads, nb_layers,
-                 attn_span, rev_net, **kargs):
+                 block_size, rev_net, **kargs):
         nn.Module.__init__(self)
         # token embeddings
         self.in_emb = nn.Embedding(vocab_size, hidden_size)
         self.out_emb = nn.Linear(hidden_size, vocab_size)
         # position embeddings
         self.key_pe = nn.Parameter(
-            torch.randn(1, hidden_size // nb_heads, attn_span))
+            torch.randn(1, hidden_size // nb_heads, block_size))
         # reversible blocks
         rev_block = (lambda x: x if not rev_net else
                      ReversibleBlock(f_block=x,
@@ -227,8 +185,9 @@ class Transformer(nn.Module):
         # transformer layers
         self.layers = nn.ModuleList([
             rev_block(TransformerLayer(hidden_size=hidden_size,
-                                       nb_heads=nb_heads,                
-                                       attn_span=attn_span, **kargs))
+                                       nb_heads=nb_heads,
+                                       block_size=block_size,
+                                       **kargs))
             for _ in range(nb_layers) ])
         if rev_net:
             self.layers = ReversibleSequence(self.layers)

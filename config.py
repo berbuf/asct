@@ -43,6 +43,12 @@ PARAMS_CONFIG = {
     },
     # model-specific
     'model_params': {
+        '--dup-batch-sz': { # duplicate, nedded in SelectAttention
+            'type': int,
+            'default': 64,
+            'help': 'duplicate batch size',
+            'dest': 'dup_batch_size'
+        },
         '--hid-sz': {
             'type': int,
             'default': 1024,
@@ -70,15 +76,9 @@ PARAMS_CONFIG = {
         },
         '--nheads': {
             'type': int,
-            'default': 1,
+            'default': 2,
             'help': 'number of self-attention heads',
             'dest': 'nb_heads'
-        },
-        '--attn-span': {
-            'type': int,
-            'default': 256,
-            'help': 'length of the attention span',
-            'dest': 'attn_span'
         },
         '--rev-net': {
             'action': 'store_true',
@@ -86,13 +86,6 @@ PARAMS_CONFIG = {
             'help': 'activate reversible network '
                     'to avoid storing gradients',
             'dest': 'rev_net'
-        },
-        '--discriminator': {
-            'action': 'store_true',
-            'default': False,
-            'help': 'activate discriminator loss'
-                    '(Electra)',
-            'dest': 'discriminator'
         },
         '--dropout': {
             'type': float,
@@ -174,39 +167,6 @@ PARAMS_CONFIG = {
             'default': True,
             'help': 'do evaluation on the whole validation and the test data',
             'dest': 'full_eval_mode'
-        },
-    },
-    # adaptive attention span specific params
-    'adapt_span_params': {
-        '--adapt-span': {
-            'action': 'store_true',
-            'default': False,
-            'help': 'enable adaptive attention span',
-            'dest': 'adapt_span_enabled'
-        },
-        '--adapt-span-loss': {
-            'type': float,
-            'default': 0,
-            'help': 'the loss coefficient for span lengths',
-            'dest': 'adapt_span_loss'
-        },
-        '--adapt-span-ramp': {
-            'type': int,
-            'default': 32,
-            'help': 'ramp length of the soft masking function',
-            'dest': 'adapt_span_ramp'
-        },
-        '--adapt-span-init': {
-            'type': float,
-            'default': 0,
-            'help': 'initial attention span ratio',
-            'dest': 'adapt_span_init'
-        },
-        '--adapt-span-cache': {
-            'action': 'store_true',
-            'default': False,
-            'help': 'adapt cache size as well to reduce memory usage',
-            'dest': 'adapt_span_cache'
         },
     },
 }

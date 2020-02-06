@@ -116,7 +116,7 @@ def train_only(model_params,
         save_checkpoint(trainer_params['checkpoint_path'],
                         iter_no, model, optimizer, scheduler, logger)
 
-def launch(env_params, model_params, adapt_span_params,
+def launch(env_params, model_params,
            optim_params, data_params, trainer_params):
     # env (device, distributed, etc.)
     distributed = env_params['distributed']
@@ -134,11 +134,9 @@ def launch(env_params, model_params, adapt_span_params,
         print('optim_params:\t', optim_params)
         print('data_params:\t', data_params)
         print('trainer_params:\t', trainer_params)
-        print('adapt_span_params:\t', adapt_span_params)
     # model
     model = Transformer(
-        vocab_size=data_params['vocab_size'], **model_params,
-        adapt_span_params=adapt_span_params)
+        vocab_size=data_params['vocab_size'], **model_params)
     # distribute
     if distributed:
         local_rank = env_params['local_rank']
