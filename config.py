@@ -93,6 +93,13 @@ PARAMS_CONFIG = {
             'help': 'dropout rate of ReLU and attention',
             'dest': 'dropout'
         },
+        '--soft': {
+            'type': float,
+            'default': 2.,
+            'help': 'soft parameter '
+                    'in select attention function',
+            'dest': 'soft'
+        },
     },
     # optimization-specific
     'optim_params': {

@@ -1,10 +1,3 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-#
-
 #!/usr/bin/env python3
 
 import math
@@ -21,17 +14,17 @@ from revnet import ReversibleBlock, ReversibleSequence
 
 class SelectAttention(nn.Module):
 
-    def __init__(self, batch_size, n_heads, max_span):
+    def __init__(self, batch_size, n_heads, max_span, soft):
         nn.Module.__init__(self)
         B, K, M = batch_size, n_heads, max_span
 
         self.n_heads = K
-        mask = (torch.linspace(0, M - 1, M)
+        x = (torch.linspace(0, M - 1, M)
                 .repeat(B * K * M, 1)
                 .reshape(B, K, M, M)
                 - torch.arange(M).float().unsqueeze(1)).cuda()
-        self.register_buffer('mask', mask)
-        self.soft = 2
+        self.register_buffer('x', x)
+        self.soft = soft
 
     def forward(self, attn, span):
         (B,M,_), K = attn.size(), self.n_heads
@@ -39,51 +32,41 @@ class SelectAttention(nn.Module):
         attn = attn.reshape(B//K, K, M, -1)
         span = span.reshape(B//K, K, M, 2, 1)
         
-        mean = span[:,:,:,1]
-        intercept = span[:,:,:,0]
-        """
-        print (attn.shape)
-        print (span.shape)
-        print (mean.shape)
-        print (intercept.shape)
-        print (self.mask.shape)
-        """
+        mean = span[:,:,:,0]
+        intercept = span[:,:,:,1]
 
-        # -((x+b)/soft)**2+a
-        z = -((self.mask - intercept) / self.soft)**2 + mean
-        z = z.clamp(0, 1)
+        # y = -((x+a)/soft)**2+b
+        y = -((self.x + mean) / self.soft)**2 + intercept
+        y = y.clamp(0, 1)
 
-        attn = attn * z
+        attn = attn * y
 
         return attn.reshape(B,M,M)
 
 class SelfAttention(nn.Module):
     """ """
-    def __init__(self, dup_batch_size, hidden_size, block_size,
-                 dropout, nb_heads, **kargs):
+    def __init__(self, hidden_size, dropout, dup_batch_size,
+                 nb_heads, block_size, soft, **kargs):
         nn.Module.__init__(self)
         self.dropout = nn.Dropout(dropout)
         self.hidden_size = hidden_size # size of a single head
         # B K M
-        self.select = SelectAttention(dup_batch_size, nb_heads, block_size)
+        self.select = SelectAttention(dup_batch_size, nb_heads, block_size, soft)
 
     def forward(self, query, key, span, value, key_pe):
         B,M,H=key.size()
-
+        # compute attention value
         attn_cont = torch.matmul(query, key.transpose(-1, -2))
         attn_pos = torch.matmul(query, key_pe)
         attn = attn_cont + attn_pos
-
-        # select
+        # select attention
         attn = self.select(attn, span)
-
+        # normalize
         attn = attn / math.sqrt(H)
         attn = F.softmax(attn, dim=-1)
-
         attn = self.dropout(attn)
-        
-        out = torch.matmul(attn_cont, value)
-        
+        # project to inner dim
+        out = torch.matmul(attn_cont, value)        
         return out
 
 class MultiHeadSelfAttention(nn.Module):
