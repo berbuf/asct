@@ -45,7 +45,6 @@ def _slice(key, key_pe, span, idx_template, align):
 
     # idx_slices
     max_span, idx_span = get_idx(span, idx_template, align)
-    calc_time(lambda: get_idx(span, idx_template, align), "idx")
     
     # key
     key = F.pad(key, (0, 0, 0, 1))
@@ -55,7 +54,7 @@ def _slice(key, key_pe, span, idx_template, align):
            .view(B * M, H, max_span))
 
     # key_pe
-    key_pe = key_pe.repeat(B, 1, 1).transpose(-1, -2)
+    key_pe = key_pe.repeat(B, 1, 1)#.transpose(-1, -2)
     key_pe = F.pad(key_pe, (0, 0, 0, 1))
     key_pe = (key_pe.view(-1, H)[idx_span]
               .view(B, M, max_span, H)
@@ -66,7 +65,7 @@ def _slice(key, key_pe, span, idx_template, align):
 
 def scaling(query, key, value, key_pe, span, idx_template, align):
     B,M,H=query.size()
-    
+
     # slices
     key, key_pe = _slice(key, key_pe, span, idx_template, align)
 
@@ -105,83 +104,69 @@ def adaptive(query, key, value, key_pe, adaptive_span):
     out = torch.matmul(attn, value)
     return a, b, x, y, z, t, out
 
-def scale(key, key_pe, span, idx_template):
+def scale(key, key_pe, span):
     B,M,H=key.size()
 
-    left_bound = span[:,:,0].round().long()
-    right_bound = span[:,:,1].round().long()
+    left_bound = span[:,:,0].max().round().long()
+    right_bound = span[:,:,1].max().round().long()
 
-    max_left = left_bound.max().item()
-    max_right = right_bound.max().item()
+    max_left = left_bound.item()
+    max_right = right_bound.item()
+    max_span = max_left + 1 + max_right
     
     key = F.pad(key, (0, 0, max_left, max_right))
-    key_pe = F.pad(key, (0, 0, max_left, max_right))
+    key_pe = F.pad(key_pe, (0, 0, max_left, max_right))
 
-    idx_span = idx_template[:,:,:max_left + 1 + max_right ]
-    
-    key_span = key.view(-1, H)[idx_span]
+    return key, key_pe, max_span
 
-    key_pe = key_pe.repeat(B, 1, 1)
-    key_pe_span = key_pe.view(-1, H)[idx_span]
-    
-    return key, key_pe
-
-def scaling2(query, key, value, key_pe, span, idx_template):
-    # key = B X M X H
+def scaling2(query, key, value, key_pe, span):
+    B,M,H=query.size()
 
     # key = B X M X L X H
-    key, key_pe = scale(key, key_pe, span, idx_template)
-    
+    key, key_pe, max_span = scale(key, key_pe, span)
+    query = query.unsqueeze(2)
+    key = key.transpose(-1, -2)
+    a = torch.stack([ torch.matmul(query[:,N], key[:,:,N:max_span+N]) for N in range(M) ])
 
-    return
+    # B X M X H * B X L X H
+
+    return a
 
 def main():
-    #B,M,H=64,256,1024
-    B,M,H=8,16,128
+    B,M,H=64,256,1024
+    #B,M,H=8,16,128
     limit_span=50
+    n_heads=2
 
     torch.manual_seed(42)
 
     adaptive_span = AdaptiveSpan(attn_span=M, adapt_span_loss=0, adapt_span_ramp=32,
                                  adapt_span_init=0, adapt_span_cache=False, nb_heads=1)
-    query = torch.FloatTensor(B*M*H).uniform_(0, 1).reshape(B, M, H)#.cuda()
-    key = torch.FloatTensor(B*M*H).uniform_(0, 1).reshape(B, M, H)#.cuda()
-    value = torch.FloatTensor(B*M*H).uniform_(0, 1).reshape(B, M, H)#.cuda()
+    query = torch.FloatTensor(B*M*H).uniform_(0, 1).reshape(B, M, H).cuda()
+    key = torch.FloatTensor(B*M*H).uniform_(0, 1).reshape(B, M, H).cuda()
+    value = torch.FloatTensor(B*M*H).uniform_(0, 1).reshape(B, M, H).cuda()
     #key_pe = torch.FloatTensor(M*H).uniform_(0, 1).reshape(1, H, M)#.cuda()
-    key_pe = torch.FloatTensor(M*H).uniform_(0, 1).reshape(1, M, H)#.cuda()
-    span = torch.FloatTensor(B*M*2).uniform_(0, 1).reshape(B, M, 2) * 10 - 5#.cuda() * 10 - 5
+    key_pe = torch.FloatTensor(M*H).uniform_(0, 1).reshape(1, M, H).cuda()
+    span = torch.FloatTensor(B*M*2*n_heads).uniform_(0, 1).reshape(B, M, 2*n_heads).cuda() * 10 - 5
     span = span.abs()
+
+    align = torch.arange(M).unsqueeze(1).cuda()
     # basic span index of max_span size
     idx_template = (torch.arange(limit_span)
                     # one idx for each token
                     .unsqueeze(1).repeat(B * M, 1)
                     # format to rows
                     .transpose(0, 1).view(B, M, limit_span)
-                    + torch.arange(M).unsqueeze(1))
-                    #.cuda())
-    #align = torch.arange(M).unsqueeze(1)#.cuda()
+                    .cuda()
+                    + align)
 
     adaptive(query, key, value, key_pe, adaptive_span)
-    scaling2(query, key, value, key_pe, span, idx_template)
+    scaling2(query, key, value, key_pe, span)
 
     # test
     for _ in range(100):
         calc_time(lambda: adaptive(query, key, value, key_pe, adaptive_span), "adaptive")
-        calc_time(lambda: scaling2(query, key, value, key_pe, span, idx_template), "scaling")
-        
-
-
-def res():
-    l = [ e.split(" ") for e in open("./res").readlines() if len(e) > 1]
-    
-    res = {}
-    for name, time in l:
-        if name not in res:
-            res[name] = []
-            res[name] += [float(time)]
-
-    for n in res:
-        print (n, sum(res[n]) / len(res[n]))
+        calc_time(lambda: scaling(query, key, value, key_pe, span, idx_template, align), "scaling")
+        calc_time(lambda: scaling2(query, key, value, key_pe, span), "scaling2")
 
 main()
-#res()

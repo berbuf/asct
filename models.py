@@ -42,61 +42,64 @@ def _unskew(X):
     X = X[:, :, :L]  # B x M x L
     return X
 
-def _window(span):
-    # window informations
-    left_bound = (torch.max(span[:,:,0], -span[:,:,1])
-                  .unsqueeze(2).round().int())
-    right_bound = (torch.max(span[:,:,0], -span[:,:,1])
-                   .unsqueeze(2).round().int())
-    max_span = ((left_bound + right_bound)
-            .abs().max().long().item()) + 1 # central token
-    return left_bound, right_bound, max_span
+class ScaleAttention(object):
+    def __init__(self, B, M, limit_span):
+        self.align = torch.arange(M).unsqueeze(1)
+        # basic span index of max_span size
+        self.idx_template = (torch.arange(limit_span)
+                             # one idx for each token
+                             .unsqueeze(1).repeat(B * M, 1)
+                             # format to rows
+                             .transpose(0, 1).view(B, M, limit_span))
 
-def _idx_span(B, M, max_span):
-    # basic span index of max_span size
-    return (torch.arange(max_span)
-            # one idx for each token
-            .unsqueeze(1).repeat(B * M, 1)
-            # format to rows
-            .transpose(0, 1).view(B, M, max_span).cuda())
+    def set_window(self, span):
+        B, M, _ = span.size()
 
-def _mask_idx(idx_span, left_bound, right_bound, align):
-    _, idx_pad, _ = idx_span.size()
-    # align index with current token
-    idx_span += align
-    # align index with actual span start for each token
-    idx_span -= left_bound
-    # index out of window indexes to idx_pad
-    idx_span[idx_span < 0] = idx_pad
-    right_mask = (right_bound + align)
-    idx_span[idx_span > right_mask] = idx_pad
-    return idx_span
+        left_bound = (torch.max(span[:,:,0], -span[:,:,1])
+                      .unsqueeze(2).round().long())
+        right_bound = (torch.max(-span[:,:,0], span[:,:,1])
+                       .unsqueeze(2).round().long())
+        len_span = (left_bound + right_bound).abs() + 1 # central token
+        max_span = len_span.max()
 
-def _extract(X, B, M, max_span, H, idx_span):
-    # extract indexes and project values to third dim
-    X_span = F.pad(X, (0, 0, 0, 1))
-    return (X_span
-            .view(-1, H)[idx_span.view(-1, max_span)]
-            .view(B, M, max_span, H))
+        # prepare idx_span
+        idx_span = self.idx_template[:,:,:max_span]
+        idx_span[:,:,] = self.align
 
-def _slice(key, key_pe, span, align):
-    B,M,H=key.size()
+        # align right, negative values are out of windows
+        aligned_right = idx_span - (max_span - len_span)
 
-    # window info
-    left_bound, right_bound, max_span = _window(span)
-    idx_span = _idx_span(B, M, max_span)
-    idx_span = _mask_idx(idx_span, left_bound, right_bound, align)
+        # scale to real values, and align left
+        idx_span = (aligned_right + self.align - left_bound).flatten()
 
-    # key
-    key_span = _extract(key, B, M, max_span, H, idx_span)
-    key_span = key_span.transpose(-1, -2).view(B*M, H, max_span)
+        # flatten for speed up, assign M to out of window indexes
+        idx_span[(aligned_right.flatten() < 0) | (idx_span > M)] = M
+        idx_span = idx_span.view(-1, max_span)
 
-    # key_pe
-    key_pe = key_pe.repeat(B, 1, 1)
-    key_pe_span = _extract(key_pe, B, M, max_span, H, idx_span)
-    key_pe_span = key_pe_span.transpose(-1, -2).reshape(B*M, H, max_span)
+        return idx_span
 
-    return key_span, key_pe_span
+    def slice(self, key, key_pe, span):
+        B,M,H = query.size()
+
+        # return idx
+        max_span, idx_span = self.set_window(span)
+
+        # key
+        key = F.pad(key, (0, 0, 0, 1))
+        key = (key.view(-1, H)[idx_span]
+               .view(B, M, max_span, H)
+               .transpose(-1, -2)
+               .view(B * M, H, max_span))
+
+        # key_pe
+        key_pe = key_pe.repeat(B, 1, 1)#.transpose(-1, -2)
+        key_pe = F.pad(key_pe, (0, 0, 0, 1))
+        key_pe = (key_pe.view(-1, H)[idx_span]
+                  .view(B, M, max_span, H)
+                  .transpose(-1, -2)
+                  .view(B * M, H, max_span))
+
+        return key, key_pe
 
 class SelfAttention(nn.Module):
     """ """
@@ -105,12 +108,7 @@ class SelfAttention(nn.Module):
         nn.Module.__init__(self)
         self.dropout = nn.Dropout(dropout)
         self.hidden_size = hidden_size # size of a single head
-        self.attn_span = attn_span
-        self.adapt_span_enabled = adapt_span_params['adapt_span_enabled']
-        self.zeros = torch.zeros(64, attn_span, attn_span, hidden_size)
-        if self.adapt_span_enabled:
-            self.adaptive_span = AdaptiveSpan(attn_span=attn_span,
-                                              **adapt_span_params, **kargs)
+        self.scale = ScaleAttention(attn_span)
 
     def forward(self, query, key, span, value, key_pe):
         B,M,H=key.size()
@@ -129,12 +127,6 @@ class SelfAttention(nn.Module):
         out = torch.mul(attn.unsqueeze(3), value.unsqueeze(2)).sum(2)
 
         return out
-
-    def get_cache_size(self):
-        if self.adapt_span_enabled:
-            return self.adaptive_span.get_cache_size()
-        else:
-            return self.attn_span
 
 class MultiHeadSelfAttention(nn.Module):
     def __init__(self, hidden_size, nb_heads, **kargs):
