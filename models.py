@@ -145,7 +145,11 @@ class TransformerLayer(nn.Module):
         h = self.norm1(h + attn_out)  # B x M x H
         ff_out = self.ff(h)
         out = self.norm2(h + ff_out)  # B x M x H
-        e = self.act(out)
+        
+        out = self.act(out)
+
+        print ("remaining token", len(out))
+
         return out
 
 class SideRevNet(nn.Module):
