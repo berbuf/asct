@@ -6,19 +6,18 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from revnet import ReversibleBlock, ReversibleSequence
-
-#from adaptive_span import AdaptiveSpan
+from act import AdaptiveComputationTime
 
 # Size notations:
-# B = batch_size, H = hidden_size, M = block_size, L = attn_span
+# B = batch_size, H = hidden_size, M = block_size, K = nb_heads
 
 class SelectAttention(nn.Module):
 
     def __init__(self, batch_size, n_heads, max_span, soft):
         nn.Module.__init__(self)
         B, K, M = batch_size, n_heads, max_span
-
         self.n_heads = K
+        # templae mask (to do: less mem)
         x = (torch.linspace(0, M - 1, M)
                 .repeat(B * K * M, 1)
                 .reshape(B, K, M, M)
@@ -28,23 +27,23 @@ class SelectAttention(nn.Module):
 
     def forward(self, attn, span):
         (B,M,_), K = attn.size(), self.n_heads
-        
+        # reshape with heads
         attn = attn.reshape(B//K, K, M, -1)
         span = span.reshape(B//K, K, M, 2, 1)
-        
+        # isolate variables
         mean = span[:,:,:,0]
         intercept = span[:,:,:,1]
-
+        # select function
         # y = -((x+a)/soft)**2+b
         y = -((self.x + mean) / self.soft)**2 + intercept
         y = y.clamp(0, 1)
-
+        # select with mask
         attn = attn * y
-
+        # restore shape
         return attn.reshape(B,M,M)
 
 class SelfAttention(nn.Module):
-    """ """
+    """ self-attention with selective attention """
     def __init__(self, hidden_size, dropout, dup_batch_size,
                  nb_heads, block_size, soft, **kargs):
         nn.Module.__init__(self)
@@ -125,19 +124,28 @@ class FeedForwardLayer(nn.Module):
         return h2
 
 class TransformerLayer(nn.Module):
-    def __init__(self, hidden_size, **kargs):
+    def __init__(self, hidden_size, nb_heads, block_size, **kargs):
         nn.Module.__init__(self)
-        self.attn = MultiHeadSelfAttention(hidden_size=hidden_size, **kargs)
+        self.attn = MultiHeadSelfAttention(hidden_size=hidden_size,
+                                           nb_heads=nb_heads,
+                                           block_size=block_size,
+                                           **kargs)
+        self.act = AdaptiveComputationTime(block_size, hidden_size,
+                                           threshold=.9, **kargs)
+        # position embeddings
+        self.key_pe = nn.Parameter(
+            torch.randn(1, hidden_size // nb_heads, block_size))
         self.ff = FeedForwardLayer(hidden_size=hidden_size, **kargs)
         self.norm1 = nn.LayerNorm(hidden_size)
         self.norm2 = nn.LayerNorm(hidden_size)
 
-    def forward(self, h, key_pe):
+    def forward(self, h):
         # h = B x M x H
-        attn_out = self.attn(h, key_pe)
+        attn_out = self.attn(h, self.key_pe)
         h = self.norm1(h + attn_out)  # B x M x H
         ff_out = self.ff(h)
         out = self.norm2(h + ff_out)  # B x M x H
+        e = self.act(out)
         return out
 
 class SideRevNet(nn.Module):
@@ -157,30 +165,31 @@ class Transformer(nn.Module):
         # token embeddings
         self.in_emb = nn.Embedding(vocab_size, hidden_size)
         self.out_emb = nn.Linear(hidden_size, vocab_size)
-        # position embeddings
-        self.key_pe = nn.Parameter(
-            torch.randn(1, hidden_size // nb_heads, block_size))
         # reversible blocks
-        rev_block = (lambda x: x if not rev_net else
+        rev_block = (lambda x:
                      ReversibleBlock(f_block=x,
                                      g_block=SideRevNet(hidden_size=hidden_size),
                                      split_along_dim=-1))
         # transformer layers
-        self.layers = nn.ModuleList([
-            rev_block(TransformerLayer(hidden_size=hidden_size,
-                                       nb_heads=nb_heads,
-                                       block_size=block_size,
-                                       **kargs))
-            for _ in range(nb_layers) ])
-        if rev_net:
-            self.layers = ReversibleSequence(self.layers)
+        layer = TransformerLayer(hidden_size=hidden_size,
+                                 nb_heads=nb_heads,
+                                 block_size=block_size,
+                                 **kargs)
+
+        self.layers = ReversibleSequence(
+            nn.ModuleList([ rev_block(layer)
+                            for _ in range(nb_layers) ]))
 
     def forward(self, x):
         # project into embeddings
         h = self.in_emb(x)  #  B x M => B x M x H
+        # rev net
+        h = torch.cat([h, h], dim = -1)
         # iter on layers
-        for l, layer in enumerate(self.layers):
-            h = layer(h, self.key_pe)  # B x M x H
+        h = self.layers(h)
+        #for l in range(self.nb_layers):
+        #    h = self.layer(h)  # B x M x H
+        h = torch.stack(h.chunk(2,-1)).sum(0)
         # decoder
         out = F.log_softmax(self.out_emb(h), dim=-1)
         return out

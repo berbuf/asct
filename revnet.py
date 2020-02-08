@@ -172,7 +172,3 @@ class ReversibleSequence(nn.Module):
         '''
         x = _ReversibleModuleFunction.apply(x, self.reversible_blocks)
         return x
-
-    def __iter__(self):
-        for elem in self.reversible_blocks:
-            yield elem.f_block
