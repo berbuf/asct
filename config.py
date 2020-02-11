@@ -18,6 +18,12 @@ PARAMS_CONFIG = {
             'help': 'used in distributed training',
             'dest': 'local_rank'
         },
+        '--device_num': {
+            'type': int,
+            'default': 2,
+            'help': 'gpu num',
+            'dest': 'device_num'
+        },
     },
     # data-specific
     'data_params': {
@@ -63,7 +69,7 @@ PARAMS_CONFIG = {
         },
         '--nlayers': {
             'type': int,
-            'default': 1,
+            'default': 3,
             'help': 'number of layers',
             'dest': 'nb_layers'
         },

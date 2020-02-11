@@ -4,7 +4,8 @@ import torch.nn.functional as F
 
 class AdaptiveComputationTime(nn.Module):
 
-    def __init__(self, block_size, hidden_size, **kargs):
+    def __init__(self, block_size, hidden_size,
+                 dup_batch_size, **kargs):
         nn.Module.__init__(self)
         self.p = nn.Linear(hidden_size, 1).cuda()
         self.sigma = nn.Sigmoid()
@@ -95,3 +96,18 @@ class AdaptiveComputationTime(nn.Module):
     def loss(self):
         """ minimize number of updates and remaining probability """
         return self.updates, self.remainders
+
+def test():
+    #B,M,H=64,512,1024
+    torch.cuda.set_device(3)
+    B,M,H=2,10,3
+    x = torch.FloatTensor(B, M, H).uniform_(0, 10).float().cuda()
+    act = AdaptiveComputationTime(M, H, B)
+    act.init_batch(x)
+    while M > 0:
+        x = act(x)
+        x.uniform_(0, 10)
+        _,M,_=x.size()
+        print (M)
+
+test()

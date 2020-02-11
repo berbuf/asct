@@ -5,60 +5,34 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 from revnet import ReversibleBlock, ReversibleSequence
+from asa import AutoSelectAttention
 from act import AdaptiveComputationTime
 
 # Size notations:
 # B = batch_size, H = hidden_size, M = block_size, K = nb_heads
 
-class SelectAttention(nn.Module):
-
-    def __init__(self, batch_size, n_heads, max_span, soft):
-        nn.Module.__init__(self)
-        B, K, M = batch_size, n_heads, max_span
-        self.n_heads = K
-        # templae mask (to do: less mem)
-        x = (torch.linspace(0, M - 1, M)
-                .repeat(B * K * M, 1)
-                .reshape(B, K, M, M)
-                - torch.arange(M).float().unsqueeze(1)).cuda()
-        self.register_buffer('x', x)
-        self.soft = soft
-
-    def forward(self, attn, span):
-        (B,M,_), K = attn.size(), self.n_heads
-        # reshape with heads
-        attn = attn.reshape(B//K, K, M, -1)
-        span = span.reshape(B//K, K, M, 2, 1)
-        # isolate variables
-        mean = span[:,:,:,0]
-        intercept = span[:,:,:,1]
-        # select function
-        # y = -((x+a)/soft)**2+b
-        y = -((self.x + mean) / self.soft)**2 + intercept
-        y = y.clamp(0, 1)
-        # select with mask
-        attn = attn * y
-        # restore shape
-        return attn.reshape(B,M,M)
-
 class SelfAttention(nn.Module):
     """ self-attention with selective attention """
+
     def __init__(self, hidden_size, dropout, dup_batch_size,
                  nb_heads, block_size, soft, **kargs):
         nn.Module.__init__(self)
         self.dropout = nn.Dropout(dropout)
         self.hidden_size = hidden_size # size of a single head
         # B K M
-        self.select = SelectAttention(dup_batch_size, nb_heads, block_size, soft)
+        self.select = AutoSelectAttention(nb_heads, block_size, soft)
 
     def forward(self, query, key, span, value, key_pe):
         B,M,H=key.size()
         # compute attention value
         attn_cont = torch.matmul(query, key.transpose(-1, -2))
-        attn_pos = torch.matmul(query, key_pe)
-        attn = attn_cont + attn_pos
+        # TO DO CHANGE POSITION EMBEDDINGS
+        #attn_pos = torch.matmul(query, key_pe)
+        #attn = attn_cont + attn_pos
         # select attention
+        attn = attn_cont
         attn = self.select(attn, span)
         # normalize
         attn = attn / math.sqrt(H)
@@ -130,8 +104,7 @@ class TransformerLayer(nn.Module):
                                            nb_heads=nb_heads,
                                            block_size=block_size,
                                            **kargs)
-        self.act = AdaptiveComputationTime(block_size, hidden_size,
-                                           threshold=.9, **kargs)
+        self.act = AdaptiveComputationTime(block_size, hidden_size, **kargs)
         # position embeddings
         self.key_pe = nn.Parameter(
             torch.randn(1, hidden_size // nb_heads, block_size))
@@ -139,16 +112,15 @@ class TransformerLayer(nn.Module):
         self.norm1 = nn.LayerNorm(hidden_size)
         self.norm2 = nn.LayerNorm(hidden_size)
 
+
     def forward(self, h):
         # h = B x M x H
         attn_out = self.attn(h, self.key_pe)
         h = self.norm1(h + attn_out)  # B x M x H
         ff_out = self.ff(h)
         out = self.norm2(h + ff_out)  # B x M x H
-        
-        out = self.act(out)
 
-        print ("remaining token", len(out))
+        out = self.act(out)
 
         return out
 
@@ -180,20 +152,29 @@ class Transformer(nn.Module):
                                  block_size=block_size,
                                  **kargs)
 
-        self.layers = ReversibleSequence(
-            nn.ModuleList([ rev_block(layer)
-                            for _ in range(nb_layers) ]))
+        self.layer = layer
+        #self.layers = ReversibleSequence(
+        #    nn.ModuleList([ rev_block(layer)
+        #                    for _ in range(nb_layers) ]))
 
     def forward(self, x):
+        # init act
         # project into embeddings
         h = self.in_emb(x)  #  B x M => B x M x H
+        self.layer.act.init_batch(h)
         # rev net
-        h = torch.cat([h, h], dim = -1)
+        #h = torch.cat([h, h], dim = -1)
         # iter on layers
-        h = self.layers(h)
+        #h = self.layer(h)
+        while True:
+            h = self.layer(h)  # B x M x H
+            _,M,_=h.size()
+            print (M)
+            if not M:
+                break
+
         #for l in range(self.nb_layers):
-        #    h = self.layer(h)  # B x M x H
-        h = torch.stack(h.chunk(2,-1)).sum(0)
+        #h = torch.stack(h.chunk(2,-1)).sum(0)
         # decoder
         out = F.log_softmax(self.out_emb(h), dim=-1)
         return out

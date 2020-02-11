@@ -50,6 +50,7 @@ def set_up_env(env_params):
         env_params.update(
             _torch_distributed_init_process_group(
                 local_rank=env_params['local_rank']))
+    torch.cuda.set_device(env_params['device_num'])
     env_params['device'] = torch.device('cuda')
 
 ##############################################################################
