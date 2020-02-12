@@ -112,16 +112,13 @@ class TransformerLayer(nn.Module):
         self.norm1 = nn.LayerNorm(hidden_size)
         self.norm2 = nn.LayerNorm(hidden_size)
 
-
     def forward(self, h):
         # h = B x M x H
         attn_out = self.attn(h, self.key_pe)
         h = self.norm1(h + attn_out)  # B x M x H
         ff_out = self.ff(h)
         out = self.norm2(h + ff_out)  # B x M x H
-
         out = self.act(out)
-
         return out
 
 class SideRevNet(nn.Module):
@@ -151,30 +148,31 @@ class Transformer(nn.Module):
                                  nb_heads=nb_heads,
                                  block_size=block_size,
                                  **kargs)
-
         self.layer = layer
         #self.layers = ReversibleSequence(
         #    nn.ModuleList([ rev_block(layer)
         #                    for _ in range(nb_layers) ]))
 
     def forward(self, x):
-        # init act
         # project into embeddings
         h = self.in_emb(x)  #  B x M => B x M x H
-        self.layer.act.init_batch(h)
-        # rev net
-        #h = torch.cat([h, h], dim = -1)
-        # iter on layers
-        #h = self.layer(h)
-        while True:
+
+        # init act
+        self.layer.act.init_batch()
+
+        # loop until empty
+        _,M,_=h.size()
+        while M:
             h = self.layer(h)  # B x M x H
             _,M,_=h.size()
-            print (M)
-            if not M:
-                break
 
-        #for l in range(self.nb_layers):
+        h = self.layer.act.weighted_h
+
+        # rev net
+        #h = torch.cat([h, h], dim = -1)
         #h = torch.stack(h.chunk(2,-1)).sum(0)
+
         # decoder
         out = F.log_softmax(self.out_emb(h), dim=-1)
+
         return out

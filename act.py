@@ -4,14 +4,13 @@ import torch.nn.functional as F
 
 class AdaptiveComputationTime(nn.Module):
 
-    def __init__(self, block_size, hidden_size, **kargs):
+    def __init__(self, block_size, hidden_size,
+                 dup_batch_size, **kargs):
         nn.Module.__init__(self)
-        self.p = nn.Linear(hidden_size, 1).cuda()
+        B,M,H=dup_batch_size, block_size, hidden_size
+        self.p = nn.Linear(H, 1).cuda()
         self.sigma = nn.Sigmoid()
-        self.threshold = .99
-
-    def init_batch(self, h):
-        B,M,H=h.size()
+        self.threshold = .99        
         # final distribution on weights
         self.weighted_h = torch.zeros(B, M, H).cuda()
         self.acc_p = torch.zeros(B, M, 1).cuda()
@@ -24,6 +23,13 @@ class AdaptiveComputationTime(nn.Module):
         self.index_run = torch.arange(B*M).reshape(B, M, 1).cuda()
         self.unpack_weights = torch.zeros(B, M, H).cuda()
         self.align = torch.arange(M).cuda()
+
+    def init_batch(self):
+        self.weighted_h.fill_(0)
+        self.acc_p.fill_(0)
+        self.updates = 0
+        self.remainders.fill_(0)
+        self.run.fill_(True)
 
     def unpack(self, x, unpack_mask):
         """
