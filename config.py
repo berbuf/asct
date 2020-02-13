@@ -20,7 +20,7 @@ PARAMS_CONFIG = {
         },
         '--device_num': {
             'type': int,
-            'default': 2,
+            'default': 0,
             'help': 'gpu num',
             'dest': 'device_num'
         },
@@ -105,6 +105,13 @@ PARAMS_CONFIG = {
             'help': 'soft parameter '
                     'in select attention function',
             'dest': 'soft'
+        },
+        '--context_loss_scale': {
+            'type': float,
+            'default': .1,
+            'help': 'scale (std dev) parameter '
+                    'for contextual loss',
+            'dest': 'context_loss_scale'
         },
     },
     # optimization-specific

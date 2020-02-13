@@ -158,7 +158,7 @@ class Transformer(nn.Module):
         h = self.in_emb(x)  #  B x M => B x M x H
 
         # init act
-        self.layer.act.init_batch()
+        self.layer.act.init_act()
 
         # loop until empty
         _,M,_=h.size()

@@ -17,9 +17,12 @@ from utils import (
     save_checkpoint,
     Logger)
 
+from contextual_loss import ContextualLoss
+
 def eval_only(model_params,
               env_params,
               model,
+              contextual_loss,
               optimizer,
               scheduler,
               val_data,
@@ -29,12 +32,14 @@ def eval_only(model_params,
     # evaluate the model on test data
     with torch.no_grad():
         loss_val = full_eval(model=model,
+                             contextual_loss=contextual_loss,
                              optimizer=optimizer,
                              scheduler=scheduler,
                              data=val_data,
                              block_size=model_params['block_size'],
                              hidden_size=model_params['hidden_size'])
         loss_test = full_eval(model=model,
+                              contextual_loss=contextual_loss,
                               optimizer=optimizer,
                               scheduler=scheduler,
                               data=test_data,
@@ -155,11 +160,17 @@ def launch(env_params, model_params,
     iter_init = load_checkpoint(
         trainer_params['checkpoint_path'], model, optimizer, scheduler,
         logger, distributed)
+    # contextual loss
+    contextual_loss = ContextualLoss(model_params["dup_batch_size"],
+                                     model_params["block_size"],
+                                     data_params["vocab_size"],
+                                     model_params["context_loss_scale"])
     # iter
     if trainer_params['full_eval_mode']:
         eval_only(model_params,
                   env_params,
                   model,
+                  contextual_loss,
                   optimizer,
                   scheduler,
                   val_data,

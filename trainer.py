@@ -4,12 +4,14 @@ import math
 import random
 import torch
 
-def _train_step(model, X, Y, eval_only, loss_div=1):
+def _train_step(model, contextual_loss, X, Y, eval_only, loss_div=1):
     # forward
     out = model(X)
     # compute loss
-    out = out.view(-1, out.size(-1))
-    loss = torch.nn.functional.nll_loss(out, Y.view(-1))
+    exit_token = model.layer.act.exit_
+    loss = contextual_loss.loss(out, Y, exit_token)
+    #out = out.view(-1, out.size(-1))
+    #loss = torch.nn.functional.nll_loss(out, Y.view(-1))
     loss_value = loss.item() / loss_div
     if not eval_only:
         # compute loss for adaptive span
@@ -20,13 +22,13 @@ def _train_step(model, X, Y, eval_only, loss_div=1):
         (loss / loss_div).backward()
     return loss_value
 
-def _train_batch(model, optimizer, scheduler, X, Y,
-                 eval_only, batch_split):
+def _train_batch(model, contextual_loss, optimizer, scheduler,
+                 X, Y, eval_only, batch_split):
     # start gradient
     if not eval_only:
         optimizer.zero_grad()
     # train step
-    loss_value = _train_step(model, X, Y, eval_only)
+    loss_value = _train_step(model, contextual_loss, X, Y, eval_only)
     if not eval_only:
         # schedule lr
         if scheduler is not None:
@@ -77,7 +79,8 @@ def train_iteration(model, optimizer, scheduler, data, nb_batches_per_iter,
     return (loss_all / actual_nb_batches_per_iter,
             train_pos, h_cache)
 
-def full_eval(model, optimizer, scheduler, data, block_size, hidden_size):
+def full_eval(model, contextual_loss, optimizer, scheduler,
+              data, block_size, hidden_size):
     # eval mode
     model.eval()
     # loop parameters
@@ -93,6 +96,7 @@ def full_eval(model, optimizer, scheduler, data, block_size, hidden_size):
         # batch step
         loss = _train_batch(
             model=model,
+            contextual_loss=contextual_loss,
             optimizer=optimizer,
             scheduler=scheduler,
             X=X, Y=Y,

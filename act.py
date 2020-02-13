@@ -17,6 +17,7 @@ class AdaptiveComputationTime(nn.Module):
         # N and remainder
         self.updates = 0
         self.remainders = torch.zeros(B, M, 1).cuda()
+        self.exit_ = torch.zeros(B, M, 1).long().cuda()
         # global mask
         self.run = torch.ones(B, M, 1).bool().cuda()
         # helper for masks
@@ -24,11 +25,12 @@ class AdaptiveComputationTime(nn.Module):
         self.unpack_weights = torch.zeros(B, M, H).cuda()
         self.align = torch.arange(M).cuda()
 
-    def init_batch(self):
+    def init_act(self):
         self.weighted_h.fill_(0)
         self.acc_p.fill_(0)
         self.updates = 0
         self.remainders.fill_(0)
+        self.exit_.fill_(0)
         self.run.fill_(True)
 
     def unpack(self, x, unpack_mask):
@@ -94,10 +96,7 @@ class AdaptiveComputationTime(nn.Module):
         self.run *= mask_continue
         self.remainders += p * mask_exit
         self.updates += 1
+        self.exit_ += self.updates * mask_exit
         # left pack h
         h = self.pack(h, self.run)
         return h
-
-    def loss(self):
-        """ minimize number of updates and remaining probability """
-        return self.updates, self.remainders
