@@ -1,12 +1,14 @@
 import os
-from os.path import join
 import torch
+from os.path import join
 from tokenizers import BPETokenizer
 
 def get_tokenizer(data_path, tokenize, vocab_size):
     if not tokenize:
+        print ("Load tokenizer")
         return BPETokenizer(join(data_path, "tokenizer-vocab.json"),
                             join(data_path, "tokenizer-merges.txt"))
+    print ("Create tokenizer")
     tokenizer = BPETokenizer()
     tokenizer.train([
             join(data_path, 'train.txt'),

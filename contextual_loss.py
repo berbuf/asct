@@ -14,13 +14,13 @@ def _skew(X):
 
 class ContextualLoss(object):
 
-    def __init__(self, dup_batch_size,
-                 block_size, vocab_size, scale):
-        self.max_scale = 1
-        self.scale = scale
+    def __init__(self, vocab_size, batch_size,
+                 block_size, context_loss_scale, **kargs):
+        self.max_scale = 0
+        self.scale = context_loss_scale
         self.windows = torch.tensor([]).float()
-        self.p_voc = (torch.zeros(dup_batch_size,
-                                 block_size, vocab_size)
+        self.p_voc = (torch.zeros(batch_size,
+                                  block_size, vocab_size)
                       .cuda())
 
     def gaussian_windows(self, exit_token):

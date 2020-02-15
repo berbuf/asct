@@ -4,109 +4,73 @@ import math
 import random
 import torch
 
-def _train_step(model, contextual_loss, X, Y, eval_only, loss_div=1):
+def _train_step(main_params, X, eval_only, loss_div=1):
+    return 1
+    model, context_loss = main_params["model"], main_params["loss"]
     # forward
     out = model(X)
     # compute loss
     exit_token = model.layer.act.exit_
     loss = contextual_loss.loss(out, Y, exit_token)
+    loss_value = loss.item() / loss_div
     #out = out.view(-1, out.size(-1))
     #loss = torch.nn.functional.nll_loss(out, Y.view(-1))
-    loss_value = loss.item() / loss_div
+    # backpropagation
     if not eval_only:
-        # compute loss for adaptive span
-        if model.module.layers[0].attn.attn.adapt_span_enabled:
-            loss += sum(layer.attn.attn.adaptive_span.get_loss()
-                        for layer in model.module.layers)
-        # backpropagate loss
         (loss / loss_div).backward()
     return loss_value
 
-def _train_batch(model, contextual_loss, optimizer, scheduler,
-                 X, Y, eval_only, batch_split):
-    # start gradient
+def _train_batch(main_params, X, eval_only, batch_split):
+    optimizer, scheduler = main_params["optimizer"], main_params["scheduler"]
+    # clear gradient
     if not eval_only:
         optimizer.zero_grad()
-    # train step
-    loss_value = _train_step(model, contextual_loss, X, Y, eval_only)
-    if not eval_only:
-        # schedule lr
+    loss_value = _train_step(main_params, X, eval_only)
+    # gradient descent
+    if not eval_only:         
         if scheduler is not None:
             scheduler.step()
-        # gradient descent
         optimizer.step()
-        # clamp adaptive span size
-        if model.module.layers[0].attn.attn.adapt_span_enabled:
-            for layer in model.module.layers:
-                layer.attn.attn.adaptive_span.clamp_param()
     return loss_value
 
-def train_iteration(model, optimizer, scheduler, data, nb_batches_per_iter,
-                    block_size, eval_only, train_pos, h_cache, batch_split):
+def train_iteration(main_params, trainer_params, block_size,
+                    data, eval_only, train_pos):
     # set model for train
-    model.eval() if eval_only else model.train()
-    # less batch for speed-up 
+    main_params["model"].eval() if eval_only else main_params["model"].train()
+    # less batch for speed-up
+    """
     if eval_only:
         nb_batches_per_iter = max(1, nb_batches_per_iter // 10)
         nb_batches_per_iter = min(nb_batches_per_iter,
                                   math.ceil(data.size(1) / block_size))
+    """
     # loop parameters
     loss_all = 0
-    actual_nb_batches_per_iter = 0
-    for _ in range(nb_batches_per_iter):
-        # batch data 
-        X = data[:, train_pos: train_pos + block_size].contiguous()
-        Y = data[:, train_pos + 1: train_pos + block_size + 1].contiguous()
+    for _ in range(trainer_params["nb_batches_per_iter"]):
         # batch step
-        loss, h_cache = _train_batch(
-            model=model,
-            optimizer=optimizer,
-            scheduler=scheduler,
-            X=X, Y=Y,
-            h_cache=h_cache,
-            eval_only=eval_only,
-            batch_split=batch_split)
+        X = data[:, train_pos: train_pos + block_size].contiguous()
+        loss = _train_batch(main_params, X=X, eval_only=eval_only, batch_split=1)
         # loop parameters
-        loss_all += loss
-        train_pos += block_size
-        actual_nb_batches_per_iter += 1
+        loss_all, train_pos = loss_all + loss, train_pos + block_size
         # reached the end. randomize the offset to reduce overfitting
         if train_pos >= data.size(1) - block_size:
             train_pos = random.randrange(block_size)
-            # reset the cache
-            for h in h_cache:
-                h.fill_(0)
-    return (loss_all / actual_nb_batches_per_iter,
-            train_pos, h_cache)
+    return (loss_all / trainer_params["nb_batches_per_iter"], train_pos)
 
-def full_eval(model, contextual_loss, optimizer, scheduler,
-              data, block_size, hidden_size):
+def full_eval(main_params, block_size, data):
     # eval mode
-    model.eval()
+    main_params["model"].eval()
     # loop parameters
-    loss_all = 0
-    train_pos = 0
-    actual_nb_batches_per_iter = 0
-    # iter on batches
-    nb_batches_per_iter_max = math.ceil(data.size(1) / block_size)
-    for _ in range(nb_batches_per_iter_max):
-        # batch data 
-        X = data[:, train_pos: train_pos + block_size].contiguous()
-        Y = data[:, train_pos + 1: train_pos + block_size + 1].contiguous()
+    loss_all, train_pos, nb_batches_per_iter = 0, 0, 0
+    for _ in range(math.ceil(data.size(1) / block_size)):
         # batch step
-        loss = _train_batch(
-            model=model,
-            contextual_loss=contextual_loss,
-            optimizer=optimizer,
-            scheduler=scheduler,
-            X=X, Y=Y,
-            eval_only=True,
-            batch_split=1)
+        X = data[:, train_pos: train_pos + block_size].contiguous()
+        loss = _train_batch(main_params, X=X, eval_only=True, batch_split=1)
         # loop parameters
         loss_all += loss
         train_pos += block_size
-        actual_nb_batches_per_iter += 1
+        nb_batches_per_iter += 1
+        # Skip the remaining tokens as it can't make a whole block.
         if train_pos >= data.size(1) - block_size:
-            # Skip the remaining tokens as it can't make a whole block.
             break
-    return loss_all / actual_nb_batches_per_iter
+    return loss_all / nb_batches_per_iter

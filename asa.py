@@ -12,9 +12,9 @@ class AutoSelectAttention(nn.Module):
                   torch.arange(block_size)
                   .unsqueeze(1)).cuda()
         self.soft = soft
+
     def forward(self, attn, span):
-        _, M, _ = attn.size()
-        
+        _, M, _ = attn.size()        
         # isolate variables
         mean = span[:,:,0].unsqueeze(2)
         intercept = span[:,:,1].unsqueeze(2)

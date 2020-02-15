@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-
 # command-line arguments with their default values
-
 PARAMS_CONFIG = {
+
     # env-specific
     'env_params': {
         '--distributed': {
@@ -25,6 +24,7 @@ PARAMS_CONFIG = {
             'dest': 'device_num'
         },
     },
+
     # data-specific
     'data_params': {
         '--data': {
@@ -36,7 +36,7 @@ PARAMS_CONFIG = {
         },
         '--tokenize': {
             'action': 'store_true',
-            'default': True,
+            'default': False,
             'help': 'retokenize corpus with bpe and save tokenizer',
             'dest': 'tokenize',
         },
@@ -47,14 +47,9 @@ PARAMS_CONFIG = {
             'dest': 'vocab_size',
         },
     },
+
     # model-specific
     'model_params': {
-        '--dup-batch-sz': { # duplicate, nedded in SelectAttention
-            'type': int,
-            'default': 64,
-            'help': 'duplicate batch size',
-            'dest': 'dup_batch_size'
-        },
         '--hid-sz': {
             'type': int,
             'default': 1024,
@@ -86,6 +81,12 @@ PARAMS_CONFIG = {
             'help': 'number of self-attention heads',
             'dest': 'nb_heads'
         },
+        '--dropout': {
+            'type': float,
+            'default': 0.2,
+            'help': 'dropout rate of ReLU and attention',
+            'dest': 'dropout'
+        },
         '--rev-net': {
             'action': 'store_true',
             'default': True,
@@ -93,15 +94,15 @@ PARAMS_CONFIG = {
                     'to avoid storing gradients',
             'dest': 'rev_net'
         },
-        '--dropout': {
+        '--threshold_act': {
             'type': float,
-            'default': 0.2,
-            'help': 'dropout rate of ReLU and attention',
-            'dest': 'dropout'
+            'default': .99,
+            'help': 'threshold for act exit',
+            'dest': 'threshold'
         },
         '--soft': {
             'type': float,
-            'default': 2.,
+            'default': 1.5,
             'help': 'soft parameter '
                     'in select attention function',
             'dest': 'soft'
@@ -114,6 +115,7 @@ PARAMS_CONFIG = {
             'dest': 'context_loss_scale'
         },
     },
+
     # optimization-specific
     'optim_params': {
         '--lr': {
@@ -150,6 +152,7 @@ PARAMS_CONFIG = {
             'dest': 'grad_clip'
         },
     },
+
     # trainer-specific
     'trainer_params': {
         '--batch-sz': {
@@ -184,7 +187,7 @@ PARAMS_CONFIG = {
         },
         '--full-eval-mode': {
             'action': 'store_true',
-            'default': True,
+            'default': False,
             'help': 'do evaluation on the whole validation and the test data',
             'dest': 'full_eval_mode'
         },

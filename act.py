@@ -4,10 +4,10 @@ import torch.nn.functional as F
 
 class AdaptiveComputationTime(nn.Module):
 
-    def __init__(self, block_size, hidden_size,
-                 dup_batch_size, **kargs):
+    def __init__(self, batch_size, block_size,
+                 hidden_size, threshold, **kargs):
         nn.Module.__init__(self)
-        B,M,H=dup_batch_size, block_size, hidden_size
+        B,M,H=batch_size, block_size, hidden_size
         self.p = nn.Linear(H, 1).cuda()
         self.sigma = nn.Sigmoid()
         self.threshold = .99        

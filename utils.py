@@ -133,17 +133,16 @@ def load_checkpoint(checkpoint_path, model, optimizer, scheduler, logger,
                                 distributed=distributed)
     return 0
 
-def save_checkpoint(checkpoint_path, iter_no, model,
-                    optimizer, scheduler, logger):
+def save_checkpoint(checkpoint_path, iter_no, main_params):
     if checkpoint_path:
         checkpoint_state = {
             'iter_no': iter_no,  # last completed iteration
-            'model': model.state_dict(),
-            'logger': logger.state_dict(),
-            'optimizer': optimizer.state_dict(),
+            'model': main_params["model"].state_dict(),
+            'logger': main_params["logger"].state_dict(),
+            'optimizer': main_params["optimizer"].state_dict(),
         }
-        if scheduler is not None:
-            checkpoint_state['scheduler_iter'] = scheduler.last_epoch
+        if main_params["scheduler"] is not None:
+            checkpoint_state['scheduler_iter'] = main_params["scheduler"].last_epoch
         torch.save(checkpoint_state, checkpoint_path)
 
 ##############################################################################
@@ -165,9 +164,10 @@ class Logger:
             self._state_dict[title] = []
         self._state_dict[title].append(value)
 
-    def log_iter(self, iter_no, nb_batches_per_iter, loss_train, loss_val,
-                 elapsed, model):
-        step = (iter_no + 1) * nb_batches_per_iter
+    def log_iter(self, main_params, trainer_params,
+                 iter_no, elapsed,
+                 loss_train, loss_val):
+        step = (iter_no + 1) * trainer_params["nb_batches_per_iter"]
         train_bpc = float(loss_train / math.log(2))
         val_bpc = float(loss_val / math.log(2))
         msg = 'steps: {}'.format(step)
@@ -176,19 +176,5 @@ class Logger:
         self._log(title='step', value=step)
         self._log(title='train_bpc', value=train_bpc)
         self._log(title='val_bpc', value=val_bpc)
-
-        if model.module.layers[0].attn.attn.adapt_span_enabled:
-            avg_spans = []
-            max_spans = []
-            for layer in model.module.layers:
-                avg_spans.append(
-                    layer.attn.attn.adaptive_span.get_current_avg_span())
-                max_spans.append(
-                    layer.attn.attn.adaptive_span.get_current_max_span())
-            span_avg = float(sum(avg_spans)) / len(avg_spans)
-            span_max = float(max(max_spans))
-            self._log('span_avg', span_avg)
-            self._log('span_max', span_max)
-            msg += "\tspan_avg: {:.0f}\tspan_max: {:.0f}".format(span_avg, span_max)
 
         print(msg)
