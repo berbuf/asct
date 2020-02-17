@@ -34,12 +34,6 @@ PARAMS_CONFIG = {
                     '(must contain train.txt, valid.txt and test.txt)',
             'dest': 'data_path'
         },
-        '--tokenize': {
-            'action': 'store_true',
-            'default': False,
-            'help': 'retokenize corpus with bpe and save tokenizer',
-            'dest': 'tokenize',
-        },
         '--vocab_size': {
             'type': int,
             'default': 20000,

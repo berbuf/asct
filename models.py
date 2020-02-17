@@ -103,7 +103,6 @@ class TransformerLayer(nn.Module):
     def __init__(self, batch_size, block_size, hidden_size,
                  nb_heads, act, **kargs):
         nn.Module.__init__(self)
-        return
         self.attn = MultiHeadSelfAttention(
             block_size=block_size,
             hidden_size=hidden_size,
@@ -148,14 +147,15 @@ class Generator(nn.Module):
         for _ in range(self.nb_layers):
             h = self.layer(h)  # B x M x H
         # decoder
-        out = F.log_softmax(self.out_emb(h), dim=-1)
+        out = self.out_emb(h)
+        return out
 
 class Discriminator(nn.Module):
     def __init__(self, vocab_size, batch_size, hidden_size,
                  nb_heads, nb_layers, block_size, **kargs):
         nn.Module.__init__(self)
         # decoder
-        self.out_emb = nn.Linear(hidden_size, vocab_size)
+        self.out_emb = nn.Linear(hidden_size, block_size)
         # transformer layers
         self.layer = TransformerLayer(batch_size=batch_size,
                                       block_size=block_size,
@@ -174,7 +174,7 @@ class Discriminator(nn.Module):
             _,M,_=h.size()
         h = self.layer.act.weighted_h
         # decoder
-        out = F.log_softmax(self.out_emb(h), dim=-1)
+        out = F.sigmoid(self.out_emb(h), dim=-1)
         return out
 
 class GenDisc(nn.Module):
@@ -188,9 +188,10 @@ class GenDisc(nn.Module):
         self.disc = Discriminator(vocab_size, batch_size,
                                   **model_params)
 
-    def forward(self, x_masked):
+    def forward(self, x):
         h = self.in_emb(x)
         out_gen = self.gen(h)
+        return None
         x_gen = decode(out_gen)
         h = self.in_emb(x_gen)
         out_disc = self.disc(h)
