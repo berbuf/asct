@@ -5,16 +5,28 @@ import random
 import torch
 
 def _train_step(main_params, X, Y, eval_only, loss_div=1):
-    model, context_loss = main_params["model"], main_params["loss"]
+    #model, context_loss = main_params["model"], main_params["loss"]
+    model = main_params["model"]
+
     # forward
     out = model(X)
-    return 1
-    # compute loss
-    exit_token = model.layer.act.exit_
-    loss = contextual_loss.loss(out, Y, exit_token)
+
+    # loss generator
+    # correct token ???
+    #out_gen = out_gen.view(-1, out_gen.size(-1))
+    loss = torch.nn.functional.nll_loss(out, Y.view(-1))
+    #loss_gen = (1 - out_gen).mean()
+
+    # loss discriminator
+    #exit_token = model.layer.act.exit_
+    #loss_disc = Y == out_gen.argmax(2)
+    
+    #loss += contextual_loss.loss_disc(out_disc, Y_disc, exit_token)
+
+    #loss = loss_gen + loss_disc
+    
     loss_value = loss.item() / loss_div
-    #out = out.view(-1, out.size(-1))
-    #loss = torch.nn.functional.nll_loss(out, Y.view(-1))
+
     # backpropagation
     if not eval_only:
         (loss / loss_div).backward()

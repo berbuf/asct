@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.autograd import Variable
 
 class AdaptiveComputationTime(nn.Module):
 
@@ -11,26 +12,30 @@ class AdaptiveComputationTime(nn.Module):
         self.p = nn.Linear(H, 1).cuda()
         self.sigma = nn.Sigmoid()
         self.threshold = .99        
-        # final distribution on weights
-        self.weighted_h = torch.zeros(B, M, H).cuda()
-        self.acc_p = torch.zeros(B, M, 1).cuda()
-        # N and remainder
+        # global variables
         self.updates = 0
-        self.remainders = torch.zeros(B, M, 1).cuda()
         self.exit_ = torch.zeros(B, M, 1).long().cuda()
-        # global mask
         self.run = torch.ones(B, M, 1).bool().cuda()
-        # helper for masks
+        # helper
         self.index_run = torch.arange(B*M).reshape(B, M, 1).cuda()
-        self.unpack_weights = torch.zeros(B, M, H).cuda()
         self.align = torch.arange(M).cuda()
+        # buffer
+        self.buffer_unpack_h = torch.zeros(B, M, H).cuda()
+        self.buffer_weighted_h = torch.zeros(B, M, H).cuda()
+        self.buffer_acc_p = torch.zeros(B, M, 1).cuda()
 
     def init_act(self):
-        self.weighted_h.fill_(0)
-        self.acc_p.fill_(0)
+        # buffer
+        self.buffer_unpack_h.zero_()
+        self.buffer_weighted_h.zero_()
+        self.buffer_acc_p.zero_()
+
+        self.unpack_h = Variable(self.buffer_unpack_h)
+        self.weighted_h = Variable(self.buffer_weighted_h)
+        self.acc_p = Variable(self.buffer_acc_p)
+
         self.updates = 0
-        self.remainders.fill_(0)
-        self.exit_.fill_(0)
+        self.exit_.zero_()
         self.run.fill_(True)
 
     def unpack(self, x, unpack_mask):
@@ -41,18 +46,17 @@ class AdaptiveComputationTime(nn.Module):
          [C, E, E]]     [Z, Z, Z, Z, C]]
         C: Continue, E: Exit, Z: Zero 
         """
-        _,_,H=x.size()
+        B,M,H=self.unpack_h.size()
         # to do pad with pad token
-        self.unpack_weights.fill_(0)
+        self.unpack_h.zero_()
         sum_ = unpack_mask.sum(1).view(-1)
         max_ = sum_.max()
-        pack_mask = (-self.align[:max_] + (sum_).unsqueeze(1))
+        pack_mask = (-self.align[:max_] + sum_.unsqueeze(1))
         pack_mask = pack_mask.clamp(0, 1).bool()
-        (self.unpack_weights.view(-1, H)
-         .index_copy_(0,
-                      self.index_run[unpack_mask],
-                      x[pack_mask]))
-        return self.unpack_weights
+        return (self.unpack_h.view(-1, H)
+                .index_copy(0,
+                            self.index_run[unpack_mask],
+                            x[pack_mask]).view(B, M, H))
 
     def pack(self, x, unpack_mask):
         """
@@ -81,7 +85,7 @@ class AdaptiveComputationTime(nn.Module):
         h = self.unpack(h, self.run)
         # exit probability
         p = self.sigma(self.p(h)) * self.run
-        self.acc_p += p
+        self.acc_p = self.acc_p + p
         # masks
         mask_continue = (self.acc_p < self.threshold) * self.run
         mask_exit = (~mask_continue) * self.run
@@ -93,10 +97,9 @@ class AdaptiveComputationTime(nn.Module):
             self.weighted_h * (1 - p)
         )
         # update containers
-        self.run *= mask_continue
-        self.remainders += p * mask_exit
+        self.run = self.run * mask_continue
         self.updates += 1
-        self.exit_ += self.updates * mask_exit
+        self.exit_ = self.exit_ + self.updates * mask_exit
         # left pack h
         h = self.pack(h, self.run)
         return h

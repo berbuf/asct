@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # command-line arguments with their default values
-PARAMS_CONFIG = {
+PARAMS_CONFIG_SMALL = {
 
     # env-specific
     'env_params': {
@@ -29,14 +29,14 @@ PARAMS_CONFIG = {
     'data_params': {
         '--data': {
             'type': str,
-            'default': 'data/wikitext-2',
+            'default': 'data/wikitext-103',
             'help': 'data location '
                     '(must contain train.txt, valid.txt and test.txt)',
             'dest': 'data_path'
         },
         '--vocab_size': {
             'type': int,
-            'default': 20000,
+            'default': 30000,
             'help': 'size of vocabulary',
             'dest': 'vocab_size',
         },
@@ -46,44 +46,44 @@ PARAMS_CONFIG = {
     'model_params': {
         '--hid-sz': {
             'type': int,
-            'default': 1024,
+            'default': 256,
             'help': 'hidden size (i.e. model size)',
             'dest': 'hidden_size'
         },
         '--inner-hid-sz': {
             'type': int,
-            'default': 1024,
+            'default': 512,
             'help': 'inner hidden size of FF layer',
             'dest': 'inner_hidden_size'
         },
         '--nlayers': {
             'type': int,
-            'default': 3,
-            'help': 'number of layers',
+            'default': -1,
+            'help': 'number of layers for generator',
             'dest': 'nb_layers'
         },
         '--block-sz': {
             'type': int,
-            'default': 256,
+            'default': 10240,
             'help': 'block size '
                     '(the length of sequence to process in parallel)',
             'dest': 'block_size'
         },
         '--nheads': {
             'type': int,
-            'default': 2,
+            'default': 16,
             'help': 'number of self-attention heads',
             'dest': 'nb_heads'
         },
         '--dropout': {
             'type': float,
-            'default': 0.2,
+            'default': 0.1,
             'help': 'dropout rate of ReLU and attention',
             'dest': 'dropout'
         },
         '--rev-net': {
             'action': 'store_true',
-            'default': True,
+            'default': False,
             'help': 'activate reversible network '
                     'to avoid storing gradients',
             'dest': 'rev_net'
@@ -94,16 +94,9 @@ PARAMS_CONFIG = {
             'help': 'threshold for act exit',
             'dest': 'threshold'
         },
-        '--soft': {
-            'type': float,
-            'default': 1.5,
-            'help': 'soft parameter '
-                    'in select attention function',
-            'dest': 'soft'
-        },
         '--context_loss_scale': {
             'type': float,
-            'default': .1,
+            'default': .2,
             'help': 'scale (std dev) parameter '
                     'for contextual loss',
             'dest': 'context_loss_scale'
@@ -175,7 +168,7 @@ PARAMS_CONFIG = {
         },
         '--checkpoint': {
             'type': str,
-            'default': '',
+            'default': 'checkpoint/small',
             'help': 'path to save/load model',
             'dest': 'checkpoint_path'
         },

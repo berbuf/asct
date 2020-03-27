@@ -36,7 +36,18 @@ class ContextualLoss(object):
             self.max_scale = batch_max_scale
         return self.windows[exit_token.squeeze().long() - 1] # -1: (start at 0)
 
-    def loss(self, log_p, index_label, exit_token):
+    def loss_disc(self, sig_p, label, exit_token):
+        B,M,M=sig_p.size()
+        p_label = self.gaussian_windows(exit_token)
+        p_label = _skew(p_label)
+        p_label = p_label[:,:, M : -M - 1] # 
+
+
+        # \Sum_i {I_i*p_i + I_i*(1-p)}
+        loss = label * sig_p + ~label * (1 - sig_p)
+
+    # loss prob
+    def loss_log_prob(self, log_p, index_label, exit_token):
         B,M,V=log_p.size()
         p_label = self.gaussian_windows(exit_token)
         p_label = _skew(p_label)

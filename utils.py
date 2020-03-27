@@ -146,6 +146,19 @@ def save_checkpoint(checkpoint_path, iter_no, main_params):
         torch.save(checkpoint_state, checkpoint_path)
 
 ##############################################################################
+# RAM
+##############################################################################
+
+def check_ram(device):
+    t = torch.cuda.get_device_properties(device).total_memory
+    c = torch.cuda.memory_cached(device)
+    a = torch.cuda.memory_allocated(device)
+    print ()
+    print ("total mem", t)
+    print ("total cache", c)
+    print ("total allocated", a)
+
+##############################################################################
 # LOGGER
 ##############################################################################
 

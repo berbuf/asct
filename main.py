@@ -5,7 +5,7 @@ import time
 
 import torch
 
-from config import PARAMS_CONFIG
+from config import PARAMS_CONFIG_SMALL as CONFIG
 from data import get_train_val_test_data
 from models import GenDisc
 from contextual_loss import ContextualLoss
@@ -87,9 +87,19 @@ def train_only(model_params, trainer_params,
 def launch(env_params, model_params,
            optim_params, data_params, trainer_params):
     main_params = {}
-    #set_up_env(env_params)
-    #device = env_params['device']
-    device = "cpu"
+
+    # print params
+    if (env_params['distributed'] == False or
+        env_params['rank'] == 0):
+        print('env_params:\t', env_params)
+        print('model_params:\t', model_params)
+        print('optim_params:\t', optim_params)
+        print('data_params:\t', data_params)
+        print('trainer_params:\t', trainer_params)
+
+    # computation env
+    set_up_env(env_params)
+    device = env_params['device']
 
     # data
     train_data, val_data, test_data = (
@@ -107,7 +117,6 @@ def launch(env_params, model_params,
     #main_params["loss"] = ContextualLoss(data_params["vocab_size"],
     #                                     trainer_params["batch_size"],
     #                                     **model_params)
-    main_params["loss"] = ()
 
     # distributed
     if env_params['distributed']:
@@ -135,14 +144,9 @@ def launch(env_params, model_params,
     main_params["scheduler"] = scheduler
     main_params["logger"] = logger
 
-    # print params
-    if (env_params['distributed'] == False or
-        env_params['rank'] == 0):
-        print('model_params:\t', model_params)
-        print('optim_params:\t', optim_params)
-        print('data_params:\t', data_params)
-        print('trainer_params:\t', trainer_params)
-        print ('main_params:\t', main_params)
+    #save_checkpoint(checkpoint_path=trainer_params['checkpoint_path'],
+    #                iter_no=0, main_params=main_params)
+    return
 
     # iter
     if trainer_params['full_eval_mode']:
@@ -155,4 +159,4 @@ def launch(env_params, model_params,
                    val_data, train_data)
 
 if __name__ == '__main__':
-    launch(**get_params(params_config=PARAMS_CONFIG))
+    launch(**get_params(params_config=CONFIG))

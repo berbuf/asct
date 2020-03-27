@@ -1,17 +1,20 @@
 import os
 import torch
 from os.path import join
-from tokenizers import BPETokenizer
+from tokenizers import CharBPETokenizer
+
+from utils import check_ram
 
 def get_tokenizer(data_path, vocab_size):
     tok_voc = os.path.join(data_path, 'tokenizer-vocab.json')
     tok_merg = os.path.join(data_path, 'tokenizer-merges.json')
-    if os.path.exists(tok_voc) and os.path.exits(tok_merg):
+    if os.path.exists(tok_voc) and os.path.exist(tok_merg):
         print ("Load tokenizer")
-        return BPETokenizer(join(data_path, "tokenizer-vocab.json"),
+        return CharBPETokenizer(join(data_path, "tokenizer-vocab.json"),
                             join(data_path, "tokenizer-merges.txt"))
     print ("Create tokenizer")
-    tokenizer = BPETokenizer()
+    print ("Data path", join(data_path, 'train.txt'))
+    tokenizer = CharBPETokenizer()
     tokenizer.train([
         join(data_path, 'train.txt'),
         join(data_path, 'valid.txt'),
@@ -20,12 +23,13 @@ def get_tokenizer(data_path, vocab_size):
                     vocab_size=vocab_size,
                     min_frequency=2,
                     show_progress=True,
-                    special_tokens=["[CLS]", "[PAD]", "[MASK]"],
+                    special_tokens=["[CLS]", "[PAD]", "[MASK]", "[UNK]"],
     )
-    print ("[CLS]: {}, [PAD]: {}, [MASK]: {}".format(
-        str(),
+    print ("[CLS]: {}, [PAD]: {}, [MASK]: {}, [UNK]: {}".format(
+        str(tokenizer.token_to_id("[CLS]")),
         str(tokenizer.token_to_id("[PAD]")),
-        str(tokenizer.token_to_id("[CLS]"))))
+        str(tokenizer.token_to_id("[MASK]")),
+        str(tokenizer.token_to_id("[UNK]"))))
     tokenizer.save(data_path, "tokenizer")
     return tokenizer
 
@@ -56,10 +60,6 @@ class Corpus:
         self.test = _tokenize(os.path.join(data_path, 'test.txt'),
                               tokenizer)
         self.test_mask = mask(self.test.clone(), tokenizer)
-
-        t = self.train_mask[:1000]
-        m = " ".join([ tokenizer.id_to_token(e) for e in t])
-        print (m)
 
 def _batchify(data_tensor, batch_size):
     nb_batches = data_tensor.size(0) // batch_size
