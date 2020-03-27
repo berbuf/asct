@@ -7,11 +7,12 @@ from utils import check_ram
 
 def get_tokenizer(data_path, vocab_size):
     tok_voc = os.path.join(data_path, 'tokenizer-vocab.json')
-    tok_merg = os.path.join(data_path, 'tokenizer-merges.json')
-    if os.path.exists(tok_voc) and os.path.exist(tok_merg):
+    tok_merg = os.path.join(data_path, 'tokenizer-merges.txt')
+    if os.path.exists(tok_voc) and os.path.exists(tok_merg):
         print ("Load tokenizer")
         return CharBPETokenizer(join(data_path, "tokenizer-vocab.json"),
-                            join(data_path, "tokenizer-merges.txt"))
+                                join(data_path, "tokenizer-merges.txt"),
+                                unk_token="[UNK]")
     print ("Create tokenizer")
     print ("Data path", join(data_path, 'train.txt'))
     tokenizer = CharBPETokenizer()

@@ -132,8 +132,10 @@ def launch(env_params, model_params,
     optimizer, scheduler = get_optimizer_and_scheduler(
         model=model, optim_params=optim_params)
     logger = Logger()
+    path_ckpt = (trainer_params['checkpoint_path']
+                 + "_iter_" + str(trainer_params['last_iter'])) 
     main_params["iter_init"] = load_checkpoint(
-        trainer_params['checkpoint_path'], model,
+        path_ckpt, model,
         optimizer, scheduler,
         logger, env_params['distributed'])
 
@@ -144,8 +146,8 @@ def launch(env_params, model_params,
     main_params["scheduler"] = scheduler
     main_params["logger"] = logger
 
-    #save_checkpoint(checkpoint_path=trainer_params['checkpoint_path'],
-    #                iter_no=0, main_params=main_params)
+    save_checkpoint(checkpoint_path=trainer_params['checkpoint_path'],
+                    iter_no=0, main_params=main_params)
     return
 
     # iter

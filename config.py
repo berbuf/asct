@@ -19,7 +19,7 @@ PARAMS_CONFIG_SMALL = {
         },
         '--device_num': {
             'type': int,
-            'default': 0,
+            'default': 3,
             'help': 'gpu num',
             'dest': 'device_num'
         },
@@ -29,7 +29,7 @@ PARAMS_CONFIG_SMALL = {
     'data_params': {
         '--data': {
             'type': str,
-            'default': 'data/wikitext-103',
+            'default': 'data/wikitext-2',
             'help': 'data location '
                     '(must contain train.txt, valid.txt and test.txt)',
             'dest': 'data_path'
@@ -64,7 +64,7 @@ PARAMS_CONFIG_SMALL = {
         },
         '--block-sz': {
             'type': int,
-            'default': 10240,
+            'default': 1024,
             'help': 'block size '
                     '(the length of sequence to process in parallel)',
             'dest': 'block_size'
@@ -171,6 +171,12 @@ PARAMS_CONFIG_SMALL = {
             'default': 'checkpoint/small',
             'help': 'path to save/load model',
             'dest': 'checkpoint_path'
+        },
+        '--last_iter': {
+            'type': int,
+            'default': 0,
+            'help': '',
+            'dest': 'last_iter'
         },
         '--full-eval-mode': {
             'action': 'store_true',

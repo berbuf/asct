@@ -143,7 +143,7 @@ def save_checkpoint(checkpoint_path, iter_no, main_params):
         }
         if main_params["scheduler"] is not None:
             checkpoint_state['scheduler_iter'] = main_params["scheduler"].last_epoch
-        torch.save(checkpoint_state, checkpoint_path)
+        torch.save(checkpoint_state, checkpoint_path + "_iter_" + str(iter_no))
 
 ##############################################################################
 # RAM
