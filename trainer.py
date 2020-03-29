@@ -24,7 +24,7 @@ def _train_step(main_params, X, Y, eval_only, loss_div=1):
     #loss += contextual_loss.loss_disc(out_disc, Y_disc, exit_token)
 
     #loss = loss_gen + loss_disc
-    
+
     loss_value = loss.item() / loss_div
 
     # backpropagation

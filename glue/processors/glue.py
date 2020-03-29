@@ -61,6 +61,7 @@ def encode_plus(tokenizer,
     def get_input_ids(text):
         if isinstance(text, str):
             return tokenizer.encode(text).ids
+    
         """
             tokens = tokenizer.tokenize(text, add_special_tokens=add_special_tokens, **kwargs)
             return tokenizer.convert_tokens_to_ids(tokens)
@@ -74,6 +75,11 @@ def encode_plus(tokenizer,
     first_ids = get_input_ids(text)
     second_ids = get_input_ids(text_pair) if text_pair is not None else None
 
+    # stupid special tokens added here
+    first_ids = [tokenizer.token_to_id("[CLS]")] + first_ids + [tokenizer.token_to_id("[SEP]")]
+    if text_pair is not None:
+        second_ids = second_ids + [tokenizer.token_to_id("[SEP]")]
+
     pair = bool(second_ids is not None)
     len_ids = len(first_ids)
     len_pair_ids = len(second_ids) if pair else 0
@@ -81,7 +87,7 @@ def encode_plus(tokenizer,
 
     # Handle max sequence length
     total_len = len_ids + len_pair_ids# + (num_added_tokens(pair=pair) if add_special_tokens else 0) ???
-    
+
     if max_length and total_len > max_length:
         ids, pair_ids, overflowing_tokens = self.truncate_sequences(
             ids,
@@ -121,7 +127,6 @@ def encode_plus(tokenizer,
                                                 and len(encoded_inputs["input_ids"]) < self.max_len
                                                 and self.max_len <= 10000)
     
-
     if needs_to_be_padded:
         difference = (max_length if max_length is not None else self.max_len) - len(encoded_inputs["input_ids"])
 
@@ -176,6 +181,8 @@ def glue_convert_examples_to_features(
 
     """
 
+    pad_token = tokenizer.token_to_id("[PAD]")
+    
     label_map = {label: i for i, label in enumerate(label_list)}
 
     features = []
@@ -187,6 +194,7 @@ def glue_convert_examples_to_features(
         inputs = encode_plus(
             tokenizer, example.text_a, example.text_b, add_special_tokens=True,
             max_length=max_length, return_token_type_ids=True)
+
         input_ids, token_type_ids = inputs["input_ids"], inputs["token_type_ids"]
 
         # The mask has 1 for real tokens and 0 for padding tokens. Only real
@@ -196,14 +204,9 @@ def glue_convert_examples_to_features(
         # Zero-pad up to the sequence length.
         padding_length = max_length - len(input_ids)
 
-        if pad_on_left:
-            input_ids = ([pad_token] * padding_length) + input_ids
-            attention_mask = ([0 if mask_padding_with_zero else 1] * padding_length) + attention_mask
-            token_type_ids = ([pad_token_segment_id] * padding_length) + token_type_ids
-        else:
-            input_ids = input_ids + ([pad_token] * padding_length)
-            attention_mask = attention_mask + ([0 if mask_padding_with_zero else 1] * padding_length)
-            token_type_ids = token_type_ids + ([pad_token_segment_id] * padding_length)
+        input_ids = input_ids + ([pad_token] * padding_length)
+        attention_mask = attention_mask + ([0 if mask_padding_with_zero else 1] * padding_length)
+        token_type_ids = token_type_ids + ([pad_token_segment_id] * padding_length)
 
         assert len(input_ids) == max_length, "Error with input length {} vs {}".format(len(input_ids), max_length)
         assert len(attention_mask) == max_length, "Error with input length {} vs {}".format(
@@ -217,7 +220,7 @@ def glue_convert_examples_to_features(
             label = float(example.label)
         else:
             raise KeyError(output_mode)
-
+        
         if ex_index < 5:
             logger.info("*** Example ***")
             logger.info("guid: %s" % (example.guid))
@@ -228,7 +231,6 @@ def glue_convert_examples_to_features(
 
         features.append(InputFeatures(input_ids=input_ids, attention_mask=attention_mask,
                                       token_type_ids=token_type_ids, label=label))
-
     return features
 
 

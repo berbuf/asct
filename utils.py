@@ -122,10 +122,11 @@ def _load_checkpoint(checkpoint_path, model, optimizer, scheduler, logger,
         scheduler.step(checkpoint_state['scheduler_iter'])
     return iter_init
 
-def load_checkpoint(checkpoint_path, model, optimizer, scheduler, logger,
-                    distributed):
+def load_checkpoint(checkpoint_path, iter_no, model, optimizer, scheduler, logger,
+                    parallel):
     if checkpoint_path and os.path.exists(checkpoint_path):
-        return _load_checkpoint(checkpoint_path=checkpoint_path,
+        path = "{}_{}_{}".format(checkpoint_path, "p" if f else "np", str(iter_no))
+        return _load_checkpoint(checkpoint_path=name,
                                 model=model,
                                 optimizer=optimizer,
                                 scheduler=scheduler,
@@ -134,16 +135,21 @@ def load_checkpoint(checkpoint_path, model, optimizer, scheduler, logger,
     return 0
 
 def save_checkpoint(checkpoint_path, iter_no, main_params):
-    if checkpoint_path:
+    def parallel(f):
+        state_model = main_params["model"].module if f else main_params["model"]
         checkpoint_state = {
             'iter_no': iter_no,  # last completed iteration
-            'model': main_params["model"].state_dict(),
+            'model': state_model.state_dict(),
             'logger': main_params["logger"].state_dict(),
             'optimizer': main_params["optimizer"].state_dict(),
         }
         if main_params["scheduler"] is not None:
             checkpoint_state['scheduler_iter'] = main_params["scheduler"].last_epoch
-        torch.save(checkpoint_state, checkpoint_path + "_iter_" + str(iter_no))
+        path = "{}_{}_{}".format(checkpoint_path, "p" if f else "np", str(iter_no))
+        torch.save(checkpoint_state, path)
+    if checkpoint_path:
+        parallel(f=True)
+        parallel(f=False)
 
 ##############################################################################
 # RAM

@@ -24,13 +24,14 @@ def get_tokenizer(data_path, vocab_size):
                     vocab_size=vocab_size,
                     min_frequency=2,
                     show_progress=True,
-                    special_tokens=["[CLS]", "[PAD]", "[MASK]", "[UNK]"],
+                    special_tokens=["[CLS]", "[PAD]", "[MASK]", "[UNK]", "[SEP]"],
     )
-    print ("[CLS]: {}, [PAD]: {}, [MASK]: {}, [UNK]: {}".format(
+    print ("[CLS]: {}, [PAD]: {}, [MASK]: {}, [UNK]: {}, [SEP]: {}".format(
         str(tokenizer.token_to_id("[CLS]")),
         str(tokenizer.token_to_id("[PAD]")),
         str(tokenizer.token_to_id("[MASK]")),
-        str(tokenizer.token_to_id("[UNK]"))))
+        str(tokenizer.token_to_id("[UNK]")),
+        str(tokenizer.token_to_id("[SEP]"))))
     tokenizer.save(data_path, "tokenizer")
     return tokenizer
 

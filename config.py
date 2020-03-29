@@ -19,7 +19,7 @@ PARAMS_CONFIG_SMALL = {
         },
         '--device_num': {
             'type': int,
-            'default': 3,
+            'default': 2,
             'help': 'gpu num',
             'dest': 'device_num'
         },
@@ -64,7 +64,7 @@ PARAMS_CONFIG_SMALL = {
         },
         '--block-sz': {
             'type': int,
-            'default': 1024,
+            'default': 512,
             'help': 'block size '
                     '(the length of sequence to process in parallel)',
             'dest': 'block_size'
@@ -144,7 +144,7 @@ PARAMS_CONFIG_SMALL = {
     'trainer_params': {
         '--batch-sz': {
             'type': int,
-            'default': 64,
+            'default': 16,
             'help': 'batch size',
             'dest': 'batch_size'
         },

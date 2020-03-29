@@ -112,32 +112,22 @@ def launch(env_params, model_params,
                     batch_size=trainer_params["batch_size"],
                     model_params=model_params)
     model = model.to(device)
+    model = torch.nn.DataParallel(model)
 
     # contextual loss
     #main_params["loss"] = ContextualLoss(data_params["vocab_size"],
     #                                     trainer_params["batch_size"],
     #                                     **model_params)
 
-    # distributed
-    if env_params['distributed']:
-        local_rank = env_params['local_rank']
-        model = torch.nn.parallel.DistributedDataParallel(
-            model, device_ids=[local_rank],
-            output_device=local_rank)
-    else:
-        #model = torch.nn.DataParallel(model)
-        pass
-
     # optimizer, scheduler, logger and resume from checkpoint
     optimizer, scheduler = get_optimizer_and_scheduler(
         model=model, optim_params=optim_params)
     logger = Logger()
-    path_ckpt = (trainer_params['checkpoint_path']
-                 + "_iter_" + str(trainer_params['last_iter'])) 
     main_params["iter_init"] = load_checkpoint(
-        path_ckpt, model,
+        trainer_params['checkpoint_path'],
+        trainer_params['last_iter'], model,
         optimizer, scheduler,
-        logger, env_params['distributed'])
+        logger, parallel=True)
 
     # store main params
     main_params["model"] = model

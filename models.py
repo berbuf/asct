@@ -10,6 +10,8 @@ import torch.nn.functional as F
 from asa import AutoSelectAttention
 from act import AdaptiveComputationTime
 
+from torch.nn import CrossEntropyLoss, MSELoss
+
 # Size notations:
 # B = batch_size, H = hidden_size, M = block_size, K = nb_heads
 
@@ -24,9 +26,9 @@ class SelfAttention(nn.Module):
         # B K M
         self.select = AutoSelectAttention(nb_heads, block_size)
 
-    def forward(self, query, key, span, value):
+    def forward(self, span, value):
         """ light attention implementation """ 
-        B,M,H=key.size()
+        B,M,H=value.size()
         # compute attention value
         #attn_cont = torch.matmul(query, key.transpose(-1, -2))
         # select attention
@@ -34,7 +36,7 @@ class SelfAttention(nn.Module):
         attn = self.select(span)
         # normalize
         attn = attn / math.sqrt(H)
-        #attn = F.softmax(attn, dim=-1)
+        attn = F.softmax(attn, dim=-1)
         #attn = self.dropout(attn)
         # project to inner dim
         out = torch.matmul(attn, value)        
@@ -53,7 +55,7 @@ class MultiHeadSelfAttention(nn.Module):
         #self.proj_query = nn.Linear(hidden_size, hidden_size, bias=False)
         self.proj_out = nn.Linear(hidden_size, hidden_size, bias=False)
         self.proj_val = nn.Linear(hidden_size, hidden_size, bias=False)
-        self.proj_span = nn.Linear(hidden_size, 2 * nb_heads, bias=False)
+        self.proj_span = nn.Linear(hidden_size, 3 * nb_heads, bias=False)
         #self.proj_key = nn.Linear(hidden_size, hidden_size, bias=False)
 
     def head_reshape(self, x, head_dim):
@@ -75,7 +77,7 @@ class MultiHeadSelfAttention(nn.Module):
         #                          self.head_dim)
         #key = self.head_reshape(self.proj_key(h),
         #                        self.head_dim)
-        span = self.head_reshape(self.proj_span(h), 2)
+        span = self.head_reshape(self.proj_span(h), 3)
         value = self.head_reshape(self.proj_val(h),
                                   self.head_dim)
 
@@ -106,22 +108,17 @@ class FeedForwardLayer(nn.Module):
 class TransformerLayer(nn.Module):
 
     def __init__(self, batch_size, block_size, hidden_size,
-                 nb_heads, act, **kargs):
+                 nb_heads, **kargs):
         nn.Module.__init__(self)
         self.attn = MultiHeadSelfAttention(
             block_size=block_size,
             hidden_size=hidden_size,
             nb_heads=nb_heads,
             **kargs)
-        if act:
-            self.act_module = AdaptiveComputationTime(
-                batch_size, block_size,
-                hidden_size, **kargs)
         self.ff = FeedForwardLayer(hidden_size=hidden_size,
                                    **kargs)
         self.norm1 = nn.LayerNorm(hidden_size)
         self.norm2 = nn.LayerNorm(hidden_size)
-        self.act = act
 
     def forward(self, h):
         # h = B x M x H
@@ -129,8 +126,6 @@ class TransformerLayer(nn.Module):
         h = self.norm1(h + attn_out)  # B x M x H
         ff_out = self.ff(h)
         out = self.norm2(h + ff_out)  # B x M x H
-        if self.act:
-            out = self.act_module(out)
         return out
 
 class Generator(nn.Module):
@@ -144,7 +139,6 @@ class Generator(nn.Module):
                                       block_size=block_size,
                                       hidden_size=hidden_size,
                                       nb_heads=nb_heads,
-                                      act=False,
                                       **kargs)
         self.nb_layers = nb_layers
 
@@ -167,22 +161,31 @@ class Discriminator(nn.Module):
                                       block_size=block_size,
                                       hidden_size=hidden_size,
                                       nb_heads=nb_heads,
-                                      act=True,
                                       **kargs)
+        self.act_module = AdaptiveComputationTime(
+            batch_size, block_size,
+            hidden_size, **kargs)
 
     def forward(self, h):
+        # test
+        for _ in range(3):
+            h = self.layer(h)  # B x M x H
+        return h, None
+
         # init act
         self.layer.act_module.init_act()
         # loop until empty
         _,M,_=h.size()
         while M:
             h = self.layer(h)  # B x M x H
+            h = self.act_module(h)
             _,M,_=h.size()
-            print (M)        
+            #print (M)
+
         h = self.layer.act_module.weighted_h
         # decoder
         out = torch.sigmoid(self.out_emb(h))
-        return out
+        return h, out
 
 class GenDisc(nn.Module):
 
@@ -208,29 +211,41 @@ class GenDisc(nn.Module):
         out_disc = self.disc(h)
         return out_gen, out_disc
 
-class Transformer(nn.Module):
-    def __init__(self, vocab_size, batch_size, model_params):
-        nn.Module.__init__(self)
-        # decoder
-        self.out_emb = nn.Linear(hidden_size, vocab_size)
-        # transformer layers
-        self.layer = TransformerLayer(batch_size=batch_size,
-                                      block_size=block_size,
-                                      hidden_size=hidden_size,
-                                      nb_heads=nb_heads,
-                                      act=True,
-                                      **kargs)
+class AsctSequenceClassification(nn.Module):
+    def __init__(self, task_config, model_params, asct, num_labels):
+        super().__init__()
+        self.num_labels = num_labels
+        self.in_emb = asct.in_emb
+        self.disc = asct.disc
+        self.dropout = nn.Dropout(model_params["dropout"])
 
-    def forward(self, h):
-        # init act
-        self.layer.act_module.init_act()
-        # loop until empty
-        _,M,_=h.size()
-        while M:
-            h = self.layer(h)  # B x M x H
-            _,M,_=h.size()
-            print (M)        
-        h = self.layer.act_module.weighted_h
-        # decoder
-        out = torch.sigmoid(self.out_emb(h))
-        return out
+        # pooler
+        self.dense = nn.Linear(model_params["hidden_size"], model_params["hidden_size"])
+        self.act = nn.ReLU()
+        # classifier
+        self.cls = nn.Linear(model_params["hidden_size"], self.num_labels)
+
+    def forward(self, input_ids, attention_mask, labels):
+        # embeds
+        h = self.in_emb(input_ids)
+        # features
+        h, _ = self.disc(h)
+        print (h)
+        # pooler
+        h_cls = h[:, 0]
+        h_cls = self.dense(h_cls)
+        h_cls = self.act(h_cls)
+        # classifier
+        h_cls = self.dropout(h_cls)
+        logits = self.cls(h_cls)
+
+        if self.num_labels == 1:
+            #  Regression
+            loss_fct = MSELoss()
+            loss = loss_fct(logits.view(-1), labels.view(-1))
+        else:
+            # Classification
+            loss_fct = CrossEntropyLoss()
+            loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+
+        return loss
