@@ -29,7 +29,24 @@ from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm, trange
 import numpy as np
 
-def train_glue(train_data, val_data, main_params, trainer_params, env_params, task_config):
+def p_(model):
+    print ("GRAD")
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            if param.grad is None:
+                pass
+            else:
+                print ("\t{:<40}{:<10}".format(name,
+                                               str(param.grad.norm().mean().item())))
+
+def p_data(model):
+    print ("DATA")
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            print ("\t{:<40}{:<10}".format(name,
+                                           str(param.data.norm().mean().item())))
+
+def train_glue(train_data, eval_data, main_params, trainer_params, env_params, task_config):
     model = main_params["model"]
     optimizer = main_params["optimizer"]
     scheduler = main_params["scheduler"]
@@ -39,53 +56,66 @@ def train_glue(train_data, val_data, main_params, trainer_params, env_params, ta
     train_sampler = RandomSampler(train_data)
     train_dataloader = DataLoader(train_data, sampler=train_sampler,
                                   batch_size=trainer_params["batch_size"])
-    epochs, acc_loss, nb_batches  = 0, 0., 0.
-    for e in range(epochs, task_config["num_epoch"]):
-        print ("epoch", e)
+    epochs, nb_batches  = 0, 0.
+    acc_loss, acc_loss_act, acc_loss_asa = 0., 0., 0.
+    for ep in range(epochs, task_config["num_epoch"]):
+        print ("epoch", ep)
 
         for step, batch in enumerate(train_dataloader):
-
             # ensure same batch_size
             if trainer_params["batch_size"] != len(batch[0]):
                 continue
 
             # clear gradient
             optimizer.zero_grad()
-            
+
             batch = tuple(t.to(env_params["device"]) for t in batch)
 
             loss = model(input_ids=batch[0], attention_mask=batch[1], labels=batch[3])
+            loss_act = model.disc.act_module.remainders.mean() * trainer_params["loss_act"]
+            loss_asa = model.disc.layer.attn.norm_span * trainer_params["loss_asa"]
+            exit_ = model.disc.act_module.exit_
 
-            acc_loss += loss.item()
-            nb_batches += 1
+            #print ("\t{:<10}{:<40}".format("exit", exit_.float().mean().item()))
+            #print ("\t{:<10}{:<40}".format("act", loss_act.item()))
+            #print ("\t{:<10}{:<40}".format("asa", loss_asa.item()))
+            #print ("\t{:<10}{:<40}".format("loss", loss.item()))
 
-            print(loss.item())
-            if torch.isnan(loss):
-                return
+            total_loss = loss + loss_act + loss_asa
+            total_loss.backward()
 
-            # step +1
-            loss.backward()
-            print ("GRAD")
-            for name, param in model.named_parameters():
-                if param.requires_grad:
-                    print ()
-                    print (name)
-                    print (param.data.shape)
-
-                    if param.grad is None:
-                        print ("Val: None")
-                    else:
-                        if len(param.grad.shape) > 1:
-                            print (param.grad[:10, :10])
-                        else:
-                            print (param.grad[:10])
-            return
-
-            #scheduler.step()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.)
             optimizer.step()
 
-        print ("epoch loss:", loss / nb_batches)
-            
+            #scheduler.step()
+            nb_batches += 1
+            acc_loss += loss.item()
+            acc_loss_act += loss_act.item()
+            acc_loss_asa += loss_asa.item()
+
+        print ("loss:{:<10}, act:{:<10}, asa:{:<10}".format(
+            acc_loss / nb_batches,
+            acc_loss_act / nb_batches,
+            acc_loss_asa / nb_batches))
+
+    ## Eval
+    model.eval()
+    eval_sampler = RandomSampler(eval_data)
+    eval_dataloader = DataLoader(eval_data, sampler=eval_sampler,
+                                  batch_size=trainer_params["batch_size"])
+    nb_batches, acc_loss = 0., 0.
+    for step, batch in enumerate(eval_dataloader):
+        # ensure same batch_size
+        if trainer_params["batch_size"] != len(batch[0]):
+            continue
+
+        batch = tuple(t.to(env_params["device"]) for t in batch)
+        loss = model(input_ids=batch[0], attention_mask=batch[1], labels=batch[3])
+        
+        nb_batches += 1
+        acc_loss += loss.item()
+        
+    print ("loss eval:{:<10}".format(acc_loss / nb_batches))
 
 def load_glue(tokenizer, task, task_config):
     data_path = task_config["data_path"]
@@ -170,18 +200,20 @@ def launch(task_params, env_params, model_params,
         task_config["block_size"] = model_params["block_size"]
         trainer_params["batch_size"] = task_config["batch_size"]
 
+        print('task_params:\t', task_config)
+
+        # data
+        data_path = data_params["data_path"]
+        tokenizer = CharBPETokenizer(join(data_path, "tokenizer-vocab.json"),
+                                     join(data_path, "tokenizer-merges.txt"),
+                                     unk_token="[UNK]")
+        train_data, val_data, num_labels = load_glue(tokenizer, task, task_config)
+
         # model
         model = GenDisc(vocab_size=data_params['vocab_size'],
                         batch_size=trainer_params["batch_size"],
                         model_params=model_params)
         model = model.to(device)
-
-        data_path = data_params["data_path"]
-        tokenizer = CharBPETokenizer(join(data_path, "tokenizer-vocab.json"),
-                                     join(data_path, "tokenizer-merges.txt"),
-                                     unk_token="[UNK]")
-
-        train_data, val_data, num_labels = load_glue(tokenizer, task, task_config)
 
         # optimizer, scheduler, logger and resume from checkpoint
         optim_params = task_config["optim_params"]
@@ -194,7 +226,8 @@ def launch(task_params, env_params, model_params,
             model, optimizer, scheduler,
             logger, parallel=False)
 
-        asct = AsctSequenceClassification(task_config, model_params, model, num_labels)
+        pad_idx = tokenizer.token_to_id("[PAD]")
+        asct = AsctSequenceClassification(task_config, model_params, model, num_labels, pad_idx)
         asct = asct.to(device)
 
         # store main params

@@ -3,7 +3,7 @@
 
 PARAMS_CONFIG_TASKS = {
     "cola": { 'data_path': "glue_data/CoLA/", "num_epoch": 3, "cls_layer": 2, "batch_size": 64 // 4,
-              "optim_params": {"lr": 2e-6, "optim": "sgd", "momentum": 0.9, "grad_clip": 0, "lr_warmup": 0}
+              "optim_params": {"lr": 2e-3, "optim": "sgd", "momentum": 0.9, "grad_clip": 0, "lr_warmup": 0}
     },
     "mnli": { 'data_path': "glue_data/MNLI/",
               "optim_params": {"lr": 2e-5, "optim": "sgd", "momentum": 0.9, "grad_clip": 0, "lr_warmup": 0}

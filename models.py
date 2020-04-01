@@ -29,10 +29,7 @@ class SelfAttention(nn.Module):
     def forward(self, span, value):
         """ light attention implementation """ 
         B,M,H=value.size()
-        # compute attention value
-        #attn_cont = torch.matmul(query, key.transpose(-1, -2))
         # select attention
-        #attn = attn_cont
         attn = self.select(span)
         # normalize
         attn = attn / math.sqrt(H)
@@ -57,6 +54,8 @@ class MultiHeadSelfAttention(nn.Module):
         self.proj_val = nn.Linear(hidden_size, hidden_size, bias=False)
         self.proj_span = nn.Linear(hidden_size, 3 * nb_heads, bias=False)
         #self.proj_key = nn.Linear(hidden_size, hidden_size, bias=False)
+        # loss term span
+        self.norm_span = 0.
 
     def head_reshape(self, x, head_dim):
         # x: B x M x H
@@ -80,6 +79,8 @@ class MultiHeadSelfAttention(nn.Module):
         span = self.head_reshape(self.proj_span(h), 3)
         value = self.head_reshape(self.proj_val(h),
                                   self.head_dim)
+        # norm divided by nb of token and number of heads
+        self.norm_span += (span.norm() / M / D)
 
         #out = self.attn(query, key, span, value)  # B_K x M x D
         out = self.attn(span, value)  # B_K x M x D
@@ -95,8 +96,8 @@ class FeedForwardLayer(nn.Module):
     def __init__(self, hidden_size, inner_hidden_size,
                  dropout, **kargs):
         nn.Module.__init__(self)
-        self.fc1 = nn.Linear(hidden_size, inner_hidden_size)
-        self.fc2 = nn.Linear(inner_hidden_size, hidden_size)
+        self.fc1 = nn.Linear(hidden_size, inner_hidden_size, bias=False)
+        self.fc2 = nn.Linear(inner_hidden_size, hidden_size, bias=False)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, h):
@@ -133,7 +134,7 @@ class Generator(nn.Module):
                  nb_heads, nb_layers, block_size, **kargs):
         nn.Module.__init__(self)
         # decoder
-        self.out_emb = nn.Linear(hidden_size, vocab_size)
+        self.out_emb = nn.Linear(hidden_size, vocab_size, bias=False)
         # transformer layers
         self.layer = TransformerLayer(batch_size=batch_size,
                                       block_size=block_size,
@@ -155,7 +156,7 @@ class Discriminator(nn.Module):
                  nb_heads, nb_layers, block_size, **kargs):
         nn.Module.__init__(self)
         # decoder
-        self.out_emb = nn.Linear(hidden_size, block_size)
+        self.out_emb = nn.Linear(hidden_size, block_size, bias=False)
         # transformer layers
         self.layer = TransformerLayer(batch_size=batch_size,
                                       block_size=block_size,
@@ -166,14 +167,11 @@ class Discriminator(nn.Module):
             batch_size, block_size,
             hidden_size, **kargs)
 
-    def forward(self, h):
-        # test
-        for _ in range(3):
-            h = self.layer(h)  # B x M x H
-        return h, None
-
+    def forward(self, h, pad_h):
         # init act
-        self.layer.act_module.init_act()
+        self.act_module.init_act(pad_h)
+        self.layer.attn.norm_span = 0.
+
         # loop until empty
         _,M,_=h.size()
         while M:
@@ -181,8 +179,7 @@ class Discriminator(nn.Module):
             h = self.act_module(h)
             _,M,_=h.size()
             #print (M)
-
-        h = self.layer.act_module.weighted_h
+        h = self.act_module.weighted_h
         # decoder
         out = torch.sigmoid(self.out_emb(h))
         return h, out
@@ -212,25 +209,26 @@ class GenDisc(nn.Module):
         return out_gen, out_disc
 
 class AsctSequenceClassification(nn.Module):
-    def __init__(self, task_config, model_params, asct, num_labels):
+    def __init__(self, task_config, model_params, asct, num_labels, pad_idx):
         super().__init__()
         self.num_labels = num_labels
         self.in_emb = asct.in_emb
         self.disc = asct.disc
         self.dropout = nn.Dropout(model_params["dropout"])
-
+        self.pad_idx = torch.tensor([pad_idx]).cuda()
         # pooler
-        self.dense = nn.Linear(model_params["hidden_size"], model_params["hidden_size"])
+        self.dense = nn.Linear(model_params["hidden_size"], model_params["hidden_size"], bias=False)
         self.act = nn.ReLU()
         # classifier
-        self.cls = nn.Linear(model_params["hidden_size"], self.num_labels)
+        self.cls = nn.Linear(model_params["hidden_size"], self.num_labels, bias=False)
 
     def forward(self, input_ids, attention_mask, labels):
         # embeds
         h = self.in_emb(input_ids)
+        # pad vector
+        pad_h = self.in_emb(self.pad_idx)[0]
         # features
-        h, _ = self.disc(h)
-        print (h)
+        h, _ = self.disc(h, pad_h)
         # pooler
         h_cls = h[:, 0]
         h_cls = self.dense(h_cls)

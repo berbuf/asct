@@ -7,6 +7,7 @@ class AutoSelectAttention(nn.Module):
 
     def __init__(self, n_heads, block_size):
         nn.Module.__init__(self)
+        self.n_heads = n_heads
         # skew mask
         self.x = (torch.arange(block_size) -
                   torch.arange(block_size)
@@ -20,7 +21,7 @@ class AutoSelectAttention(nn.Module):
         intercept = span[:,:,2].unsqueeze(2)
         # select function
         # y = -((x+a)/soft)**2+b
-        y = -((self.x[:M,:M] + mean) / softness)**2 + intercept
+        y = -((self.x[:M,:M] + mean) / (softness + 1e-5))**2 + intercept
         y = y.clamp(0)
         # normalize
         return y

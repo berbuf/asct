@@ -19,7 +19,7 @@ PARAMS_CONFIG_SMALL = {
         },
         '--device_num': {
             'type': int,
-            'default': 2,
+            'default': 0,
             'help': 'gpu num',
             'dest': 'device_num'
         },
@@ -93,13 +93,6 @@ PARAMS_CONFIG_SMALL = {
             'default': .99,
             'help': 'threshold for act exit',
             'dest': 'threshold'
-        },
-        '--context_loss_scale': {
-            'type': float,
-            'default': .2,
-            'help': 'scale (std dev) parameter '
-                    'for contextual loss',
-            'dest': 'context_loss_scale'
         },
     },
 
@@ -183,6 +176,25 @@ PARAMS_CONFIG_SMALL = {
             'default': False,
             'help': 'do evaluation on the whole validation and the test data',
             'dest': 'full_eval_mode'
+        },
+        "--loss_act": {
+            'type': float,
+            'default': .2,
+            'help': '',
+            'dest': 'loss_act'
+        },
+        "--loss_asa": {
+            'type': float,
+            'default': .2,
+            'help': '',
+            'dest': 'loss_asa'
+        },
+        '--context_loss_scale': {
+            'type': float,
+            'default': .2,
+            'help': 'scale (std dev) parameter '
+                    'for contextual loss',
+            'dest': 'context_loss_scale'
         },
     },
 }

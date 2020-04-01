@@ -20,20 +20,25 @@ class AdaptiveComputationTime(nn.Module):
         self.index_run = torch.arange(B*M).reshape(B, M, 1).cuda()
         self.align = torch.arange(M).cuda()
         # buffer
-        self.buffer_unpack_h = torch.zeros(B, M, H).cuda()
-        self.buffer_weighted_h = torch.zeros(B, M, H).cuda()
-        self.buffer_acc_p = torch.zeros(B, M, 1).cuda()
+        self.unpack_h = torch.zeros(B, M, H).cuda()
+        self.weighted_h = torch.zeros(B, M, H).cuda()
+        self.acc_p = torch.zeros(B, M, 1).cuda()
+        self.remainders = torch.zeros(B, M, 1).cuda()
 
-    def init_act(self):
-        # buffer
-        self.buffer_unpack_h.zero_()
-        self.buffer_weighted_h.zero_()
-        self.buffer_acc_p.zero_()
-
-        self.unpack_h = Variable(self.buffer_unpack_h)
-        self.weighted_h = Variable(self.buffer_weighted_h)
-        self.acc_p = Variable(self.buffer_acc_p)
-
+    def init_act(self, pad_h):
+        # pad vector
+        self.pad_h = pad_h
+        # detach graph
+        self.unpack_h.detach_()
+        self.weighted_h.detach_()
+        self.acc_p.detach_()
+        self.remainders.detach_()
+        # zero grad containers
+        self.unpack_h.zero_()
+        self.weighted_h.zero_()
+        self.acc_p.zero_()
+        self.remainders.zero_()
+        # zero variables
         self.updates = 0
         self.exit_.zero_()
         self.run.fill_(True)
@@ -48,7 +53,6 @@ class AdaptiveComputationTime(nn.Module):
         """
         B,M,H=self.unpack_h.size()
         # to do pad with pad token
-        self.unpack_h.zero_()
         sum_ = unpack_mask.sum(1).view(-1)
         max_ = sum_.max()
         pack_mask = (-self.align[:max_] + sum_.unsqueeze(1))
@@ -57,6 +61,16 @@ class AdaptiveComputationTime(nn.Module):
                 .index_copy(0,
                             self.index_run[unpack_mask],
                             x[pack_mask]).view(B, M, H))
+
+    def pad_(self, x, pad_n):
+        """
+        same as F.pad, but pad with vector instead of scalar
+        """
+        B,M,H=x.size()
+        x = x.view(B,-1)
+        pad_v = self.pad_h.repeat(1,pad_n*B).view(B,-1)
+        pad_x = torch.cat((x, pad_v), 1).view(B,M+pad_n,H)
+        return pad_x
 
     def pack(self, x, unpack_mask):
         """
@@ -70,13 +84,15 @@ class AdaptiveComputationTime(nn.Module):
         sum_ = unpack_mask.sum(1)
         max_ = sum_.max()
         pad = max_ - sum_.min()
-        add_mask = (self.align[:pad] + 1 -
-                    (sum_ - max_ + pad))
-        add_mask = add_mask.clamp(0, 1).bool()
-        pad_mask = torch.cat((unpack_mask.squeeze(), add_mask), 1)
-        # to do pad with pad token
-        x = F.pad(x, (0, 0, 0, pad))
-        x = x[pad_mask].reshape(B, max_, H).contiguous()
+        if pad:
+            add_mask = (self.align[:pad] + 1 -
+                        (sum_ - max_ + pad))
+            add_mask = add_mask.clamp(0, 1).bool()
+            pad_mask = torch.cat((unpack_mask.squeeze(), add_mask), 1)
+            x = self.pad_(x, pad)
+            x = x[pad_mask].reshape(B, max_, H).contiguous()
+        else:
+            x = x[unpack_mask.squeeze()].reshape(B, max_, H).contiguous()
         return x
 
     def forward(self, h):
@@ -85,21 +101,23 @@ class AdaptiveComputationTime(nn.Module):
         h = self.unpack(h, self.run)
         # exit probability
         p = self.sigma(self.p(h)) * self.run
-        self.acc_p = self.acc_p + p
         # masks
-        mask_continue = (self.acc_p < self.threshold) * self.run
+        mask_continue = (self.acc_p + p < self.threshold) * self.run
         mask_exit = (~mask_continue) * self.run
         # current p or remainder
-        p = p * mask_continue + (1 - (self.acc_p - p)) * mask_exit
+        update = p * mask_continue + (1 - self.acc_p) * mask_exit
         # ensure distribution on weighted_h
         self.weighted_h = (
-            h * p +
-            self.weighted_h * (1 - p)
+            h * update +
+            self.weighted_h# * (1 - update)
         )
         # update containers
         self.run = self.run * mask_continue
+        self.acc_p = self.acc_p + update * mask_continue
+        self.remainders = self.remainders + (1 - self.acc_p) * mask_exit
         self.updates += 1
         self.exit_ = self.exit_ + self.updates * mask_exit
         # left pack h
         h = self.pack(h, self.run)
+        #print (self.run.sum(1))
         return h
