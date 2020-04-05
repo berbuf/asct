@@ -32,6 +32,7 @@ class SelfAttention(nn.Module):
         # select attention
         attn = self.select(span)
         # normalize
+
         attn = attn / math.sqrt(H)
         attn = F.softmax(attn, dim=-1)
         #attn = self.dropout(attn)
@@ -96,8 +97,8 @@ class FeedForwardLayer(nn.Module):
     def __init__(self, hidden_size, inner_hidden_size,
                  dropout, **kargs):
         nn.Module.__init__(self)
-        self.fc1 = nn.Linear(hidden_size, inner_hidden_size, bias=False)
-        self.fc2 = nn.Linear(inner_hidden_size, hidden_size, bias=False)
+        self.fc1 = nn.Linear(hidden_size, inner_hidden_size, bias=True)
+        self.fc2 = nn.Linear(inner_hidden_size, hidden_size, bias=True)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, h):
@@ -134,7 +135,7 @@ class Generator(nn.Module):
                  nb_heads, nb_layers, block_size, **kargs):
         nn.Module.__init__(self)
         # decoder
-        self.out_emb = nn.Linear(hidden_size, vocab_size, bias=False)
+        self.out_emb = nn.Linear(hidden_size, vocab_size, bias=True)
         # transformer layers
         self.layer = TransformerLayer(batch_size=batch_size,
                                       block_size=block_size,
@@ -147,7 +148,8 @@ class Generator(nn.Module):
         for _ in range(self.nb_layers):
             h = self.layer(h)  # B x M x H
         # decoder
-        out = F.log_softmax(self.out_emb(h), dim=-1)
+        h = self.out_emb(h)
+        out = F.log_softmax(h, dim=-1)
         return out
 
 class Discriminator(nn.Module):
@@ -156,7 +158,9 @@ class Discriminator(nn.Module):
                  nb_heads, nb_layers, block_size, **kargs):
         nn.Module.__init__(self)
         # decoder
-        self.out_emb = nn.Linear(hidden_size, block_size, bias=False)
+        ## NO COTEXTUAL LOSS
+        #self.out_emb = nn.Linear(hidden_size, block_size, bias=False)
+        self.out_emb = nn.Linear(hidden_size, 1, bias=True)
         # transformer layers
         self.layer = TransformerLayer(batch_size=batch_size,
                                       block_size=block_size,
@@ -186,7 +190,7 @@ class Discriminator(nn.Module):
 
 class GenDisc(nn.Module):
 
-    def __init__(self, vocab_size, batch_size, model_params):
+    def __init__(self, vocab_size, batch_size, model_params, pad_idx):
         nn.Module.__init__(self)
         # Shared token embeddings
         self.in_emb = nn.Embedding(vocab_size,
@@ -195,34 +199,37 @@ class GenDisc(nn.Module):
                              **model_params)
         self.disc = Discriminator(vocab_size, batch_size,
                                   **model_params)
+        self.pad_idx = torch.tensor([pad_idx]).cuda()
 
     def forward(self, x_masked):
         h = self.in_emb(x_masked)
+        # pad vector
+        pad_h = self.in_emb(self.pad_idx)[0]
         # log p output of generator
         out_gen = self.gen(h)
         # generate tokens
         x_gen = out_gen.argmax(2)
-        # discriminate generated tokens
         h = self.in_emb(x_gen)
-        # sigmoid disc on block size
-        out_disc = self.disc(h)
+        # discriminate
+        _, out_disc = self.disc(h, pad_h)
         return out_gen, out_disc
 
 class AsctSequenceClassification(nn.Module):
-    def __init__(self, task_config, model_params, asct, num_labels, pad_idx):
+    def __init__(self, task_config, model_params, asct, num_labels):
         super().__init__()
         self.num_labels = num_labels
         self.in_emb = asct.in_emb
         self.disc = asct.disc
         self.dropout = nn.Dropout(model_params["dropout"])
-        self.pad_idx = torch.tensor([pad_idx]).cuda()
+        self.pad_idx = asct.pad_idx
         # pooler
-        self.dense = nn.Linear(model_params["hidden_size"], model_params["hidden_size"], bias=False)
+        self.dense = nn.Linear(model_params["hidden_size"],
+                               model_params["hidden_size"], bias=True)
         self.act = nn.ReLU()
         # classifier
-        self.cls = nn.Linear(model_params["hidden_size"], self.num_labels, bias=False)
+        self.cls = nn.Linear(model_params["hidden_size"], self.num_labels, bias=True)
 
-    def forward(self, input_ids, attention_mask, labels):
+    def forward(self, input_ids, labels):
         # embeds
         h = self.in_emb(input_ids)
         # pad vector
@@ -246,4 +253,4 @@ class AsctSequenceClassification(nn.Module):
             loss_fct = CrossEntropyLoss()
             loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
-        return loss
+        return loss, logits

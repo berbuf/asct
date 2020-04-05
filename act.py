@@ -9,6 +9,8 @@ class AdaptiveComputationTime(nn.Module):
                  hidden_size, threshold, **kargs):
         nn.Module.__init__(self)
         B,M,H=batch_size, block_size, hidden_size
+        # parrallel !!!
+        #B = B // 4
         self.p = nn.Linear(H, 1).cuda()
         self.sigma = nn.Sigmoid()
         self.threshold = .99        

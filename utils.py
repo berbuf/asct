@@ -122,10 +122,16 @@ def _load_checkpoint(checkpoint_path, model, optimizer, scheduler, logger,
         scheduler.step(checkpoint_state['scheduler_iter'])
     return iter_init
 
-def load_checkpoint(checkpoint_path, iter_no, model, optimizer, scheduler, logger,
+def load_checkpoint(trainer_params, iter_no, model,
+                    optimizer, scheduler, logger,
                     parallel):
+    checkpoint_path = trainer_params["checkpoint_path"]
     if checkpoint_path and os.path.exists(checkpoint_path):
-        path = "{}_{}_{}".format(checkpoint_path, "p" if f else "np", str(iter_no))
+        path = "{}_{}_{}_{}".format(checkpoint_path,
+                                    trainer_params["loss_act"],
+                                    trainer_params["loss_asa"],
+                                    "p" if f else "np",
+                                    str(iter_no))
         return _load_checkpoint(checkpoint_path=name,
                                 model=model,
                                 optimizer=optimizer,
@@ -134,7 +140,8 @@ def load_checkpoint(checkpoint_path, iter_no, model, optimizer, scheduler, logge
                                 distributed=distributed)
     return 0
 
-def save_checkpoint(checkpoint_path, iter_no, main_params):
+def save_checkpoint(trainer_params, main_params, iter_no):
+    checkpoint_path = trainer_params["checkpoint_path"]
     def parallel(f):
         state_model = main_params["model"].module if f else main_params["model"]
         checkpoint_state = {
@@ -145,10 +152,14 @@ def save_checkpoint(checkpoint_path, iter_no, main_params):
         }
         if main_params["scheduler"] is not None:
             checkpoint_state['scheduler_iter'] = main_params["scheduler"].last_epoch
-        path = "{}_{}_{}".format(checkpoint_path, "p" if f else "np", str(iter_no))
+        path = "{}_{}_{}_{}".format(checkpoint_path,
+                                    trainer_params["loss_act"],
+                                    trainer_params["loss_asa"],
+                                    "p" if f else "np",
+                                    str(iter_no))
         torch.save(checkpoint_state, path)
     if checkpoint_path:
-        parallel(f=True)
+        #parallel(f=True)
         parallel(f=False)
 
 ##############################################################################
@@ -184,16 +195,14 @@ class Logger:
         self._state_dict[title].append(value)
 
     def log_iter(self, main_params, trainer_params,
-                 iter_no, elapsed,
-                 loss_train, loss_val):
-        step = (iter_no + 1) * trainer_params["nb_batches_per_iter"]
-        train_bpc = float(loss_train / math.log(2))
-        val_bpc = float(loss_val / math.log(2))
-        msg = 'steps: {}'.format(step)
-        msg += '\ttrain: {:.3f}bpc\tval: {:.3f}bpc'.format(train_bpc, val_bpc)
+                 iter_no, file, elapsed,
+                 loss):
+        train_bpc = float(loss / math.log(2))
+        msg = 'iter: {}'.format(iter_no)
+        msg += '\ttrain: {:.3f}bpc'.format(train_bpc)
         msg += '\tms/batch: {:.1f}'.format(elapsed)
-        self._log(title='step', value=step)
+        self._log(title='iter', value=iter_no)
+        self._log(title='file', value=file)
         self._log(title='train_bpc', value=train_bpc)
-        self._log(title='val_bpc', value=val_bpc)
 
         print(msg)

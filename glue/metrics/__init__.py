@@ -49,7 +49,7 @@ if _has_sklearn:
             "spearmanr": spearman_corr,
             "corr": (pearson_corr + spearman_corr) / 2,
         }
-
+    import numpy as np
     def glue_compute_metrics(task_name, preds, labels):
         assert len(preds) == len(labels)
         if task_name == "cola":

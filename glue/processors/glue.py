@@ -76,7 +76,9 @@ def encode_plus(tokenizer,
     second_ids = get_input_ids(text_pair) if text_pair is not None else None
 
     # stupid special tokens added here
-    first_ids = [tokenizer.token_to_id("[CLS]")] + first_ids + [tokenizer.token_to_id("[SEP]")]
+    first_ids = ([tokenizer.token_to_id("[CLS]")] +
+                 first_ids + [tokenizer.token_to_id("[SEP]")])
+
     if text_pair is not None:
         second_ids = second_ids + [tokenizer.token_to_id("[SEP]")]
 
@@ -88,60 +90,19 @@ def encode_plus(tokenizer,
     # Handle max sequence length
     total_len = len_ids + len_pair_ids# + (num_added_tokens(pair=pair) if add_special_tokens else 0) ???
 
-    if max_length and total_len > max_length:
-        ids, pair_ids, overflowing_tokens = self.truncate_sequences(
-            ids,
-            pair_ids=pair_ids,
-            num_tokens_to_remove=total_len - max_length,
-            truncation_strategy=truncation_strategy,
-            stride=stride,
-        )
-        if return_overflowing_tokens:
-            encoded_inputs["overflowing_tokens"] = overflowing_tokens
-            encoded_inputs["num_truncated_tokens"] = total_len - max_length
-
-    # Handle special_tokens
-    if add_special_tokens:
-        sequence = (first_ids + second_ids) if pair else first_ids
-        token_type_ids = ((len(first_ids) * [0]) if second_ids is None
-                          else ([0] * len(first_ids) + [1] * len(second_ids)))
-    else:
-        sequence = first_ids + second_ids if pair else first_ids
-        token_type_ids = [0] * len(first_ids) + ([1] * len(second_ids) if pair else [])
+    sequence = (first_ids + second_ids) if pair else first_ids
 
     encoded_inputs["input_ids"] = sequence
-    if return_token_type_ids:
-        encoded_inputs["token_type_ids"] = token_type_ids
 
     if max_length and len(encoded_inputs["input_ids"]) > max_length:
+        print ("Crop")
+        print (len(encoded_inputs["input_ids"]) - max_length)
         encoded_inputs["input_ids"] = encoded_inputs["input_ids"][:max_length]
-        if return_token_type_ids:
-            encoded_inputs["token_type_ids"] = encoded_inputs["token_type_ids"][:max_length]
-        if return_special_tokens_mask:
-            encoded_inputs["special_tokens_mask"] = encoded_inputs["special_tokens_mask"][:max_length]
 
     # PADDING
-    needs_to_be_padded = pad_to_max_length and (max_length
-                                                and len(encoded_inputs["input_ids"]) < max_length
-                                                or max_length is None
-                                                and len(encoded_inputs["input_ids"]) < self.max_len
-                                                and self.max_len <= 10000)
-    
-    if needs_to_be_padded:
-        difference = (max_length if max_length is not None else self.max_len) - len(encoded_inputs["input_ids"])
-
-        if self.padding_side == "right":
-            if return_attention_mask:
-                encoded_inputs["attention_mask"] = [1] * len(encoded_inputs["input_ids"]) + [0] * difference
-            if return_token_type_ids:
-                encoded_inputs["token_type_ids"] = (
-                    encoded_inputs["token_type_ids"] + [self.pad_token_type_id] * difference)
-            if return_special_tokens_mask:
-                encoded_inputs["special_tokens_mask"] = encoded_inputs["special_tokens_mask"] + [1] * difference
-                encoded_inputs["input_ids"] = encoded_inputs["input_ids"] + [self.pad_token_id] * difference
-
-    elif return_attention_mask:
-        encoded_inputs["attention_mask"] = [1] * len(encoded_inputs["input_ids"])
+    pad_token_id = tokenizer.token_to_id("[PAD]")
+    difference = (max_length if max_length is not None else self.max_len) - len(encoded_inputs["input_ids"])
+    encoded_inputs["input_ids"] = encoded_inputs["input_ids"] + [pad_token_id] * difference
 
     return encoded_inputs
 
@@ -186,51 +147,30 @@ def glue_convert_examples_to_features(
     label_map = {label: i for i, label in enumerate(label_list)}
 
     features = []
-    for (ex_index, example) in enumerate(examples):
+    for id, example in enumerate(examples):
         len_examples = len(examples)
-        if ex_index % 10000 == 0:
-            logger.info("Writing example %d/%d" % (ex_index, len_examples))
 
         inputs = encode_plus(
             tokenizer, example.text_a, example.text_b, add_special_tokens=True,
             max_length=max_length, return_token_type_ids=True)
-
-        input_ids, token_type_ids = inputs["input_ids"], inputs["token_type_ids"]
-
-        # The mask has 1 for real tokens and 0 for padding tokens. Only real
-        # tokens are attended to.
-        attention_mask = [1 if mask_padding_with_zero else 0] * len(input_ids)
-
-        # Zero-pad up to the sequence length.
-        padding_length = max_length - len(input_ids)
-
-        input_ids = input_ids + ([pad_token] * padding_length)
-        attention_mask = attention_mask + ([0 if mask_padding_with_zero else 1] * padding_length)
-        token_type_ids = token_type_ids + ([pad_token_segment_id] * padding_length)
-
-        assert len(input_ids) == max_length, "Error with input length {} vs {}".format(len(input_ids), max_length)
-        assert len(attention_mask) == max_length, "Error with input length {} vs {}".format(
-            len(attention_mask), max_length)
-        assert len(token_type_ids) == max_length, "Error with input length {} vs {}".format(
-            len(token_type_ids), max_length)
         
+        input_ids = inputs["input_ids"]
+
+        assert len(input_ids) == max_length
+
         if output_mode == "classification":
             label = label_map[example.label]
         elif output_mode == "regression":
             label = float(example.label)
         else:
             raise KeyError(output_mode)
-        
-        if ex_index < 5:
-            logger.info("*** Example ***")
-            logger.info("guid: %s" % (example.guid))
-            logger.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
-            logger.info("attention_mask: %s" % " ".join([str(x) for x in attention_mask]))
-            logger.info("token_type_ids: %s" % " ".join([str(x) for x in token_type_ids]))
-            logger.info("label: %s (id = %d)" % (example.label, label))
 
-        features.append(InputFeatures(input_ids=input_ids, attention_mask=attention_mask,
-                                      token_type_ids=token_type_ids, label=label))
+        if id < 5:
+            print (input_ids)
+            text = [ tokenizer.id_to_token(i) for i in input_ids ]
+            print (" ".join(text))
+
+        features.append(InputFeatures(input_ids=input_ids, label=label))
     return features
 
 

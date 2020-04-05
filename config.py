@@ -19,7 +19,7 @@ PARAMS_CONFIG_SMALL = {
         },
         '--device_num': {
             'type': int,
-            'default': 0,
+            'default': 1,
             'help': 'gpu num',
             'dest': 'device_num'
         },
@@ -29,7 +29,7 @@ PARAMS_CONFIG_SMALL = {
     'data_params': {
         '--data': {
             'type': str,
-            'default': 'data/wikitext-2',
+            'default': 'data/wiki/',
             'help': 'data location '
                     '(must contain train.txt, valid.txt and test.txt)',
             'dest': 'data_path'
@@ -64,14 +64,14 @@ PARAMS_CONFIG_SMALL = {
         },
         '--block-sz': {
             'type': int,
-            'default': 512,
+            'default': 2048,
             'help': 'block size '
                     '(the length of sequence to process in parallel)',
             'dest': 'block_size'
         },
         '--nheads': {
             'type': int,
-            'default': 16,
+            'default': 8,
             'help': 'number of self-attention heads',
             'dest': 'nb_heads'
         },
@@ -137,7 +137,7 @@ PARAMS_CONFIG_SMALL = {
     'trainer_params': {
         '--batch-sz': {
             'type': int,
-            'default': 16,
+            'default': 2,
             'help': 'batch size',
             'dest': 'batch_size'
         },
@@ -179,15 +179,21 @@ PARAMS_CONFIG_SMALL = {
         },
         "--loss_act": {
             'type': float,
-            'default': .2,
+            'default': .01,
             'help': '',
             'dest': 'loss_act'
         },
         "--loss_asa": {
             'type': float,
-            'default': .2,
+            'default': .01,
             'help': '',
             'dest': 'loss_asa'
+        },
+        "--loss_gen": {
+            'type': float,
+            'default': .5,
+            'help': '',
+            'dest': 'loss_gen'
         },
         '--context_loss_scale': {
             'type': float,
