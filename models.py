@@ -19,24 +19,20 @@ class SelfAttention(nn.Module):
     """ self-attention with selective attention """
 
     def __init__(self, hidden_size, dropout,
-                 nb_heads, block_size, **kargs):
+                 nb_heads, block_size, span, **kargs):
         nn.Module.__init__(self)
         self.dropout = nn.Dropout(dropout)
-        self.hidden_size = hidden_size # size of a single head
-        # B K M
-        self.select = AutoSelectAttention(nb_heads, block_size)
+        self.select = AutoSelectAttention(L=span)
 
     def forward(self, span, value):
         """ light attention implementation """ 
         B,M,H=value.size()
         # select attention
         attn = self.select(span)
-        # normalize
-
-        attn = attn / math.sqrt(H)
         attn = F.softmax(attn, dim=-1)
         #attn = self.dropout(attn)
         # project to inner dim
+        value = self.select.repeat_val(value)
         out = torch.matmul(attn, value)        
         return out
 
@@ -50,11 +46,9 @@ class MultiHeadSelfAttention(nn.Module):
         self.attn = SelfAttention(
             hidden_size=self.head_dim,
             nb_heads=nb_heads, **kargs)
-        #self.proj_query = nn.Linear(hidden_size, hidden_size, bias=False)
         self.proj_out = nn.Linear(hidden_size, hidden_size, bias=False)
         self.proj_val = nn.Linear(hidden_size, hidden_size, bias=False)
         self.proj_span = nn.Linear(hidden_size, 3 * nb_heads, bias=False)
-        #self.proj_key = nn.Linear(hidden_size, hidden_size, bias=False)
         # loss term span
         self.norm_span = 0.
 
@@ -73,22 +67,19 @@ class MultiHeadSelfAttention(nn.Module):
         D = self.head_dim
         M = h.size(1)
 
-        #query = self.head_reshape(self.proj_query(h),
-        #                          self.head_dim)
-        #key = self.head_reshape(self.proj_key(h),
-        #                        self.head_dim)
         span = self.head_reshape(self.proj_span(h), 3)
         value = self.head_reshape(self.proj_val(h),
                                   self.head_dim)
-        # norm divided by nb of token and number of heads
-        self.norm_span += (span.norm() / M / D)
 
-        #out = self.attn(query, key, span, value)  # B_K x M x D
         out = self.attn(span, value)  # B_K x M x D
         out = out.view(B, K, M, D)  # B x K x M x D
         out = out.transpose(1, 2).contiguous()  # B x M x K x D
         out = out.view(B, M, -1)  # B x M x K_D
         out = self.proj_out(out)
+
+        # span norm
+        #self.norm_span += span.norm().mean()
+
         return out
 
 # Boom layer
@@ -132,7 +123,7 @@ class TransformerLayer(nn.Module):
 
 class Generator(nn.Module):
     def __init__(self, vocab_size, batch_size, hidden_size,
-                 nb_heads, nb_layers, block_size, **kargs):
+                 nb_heads, nb_layers_gen, block_size, **kargs):
         nn.Module.__init__(self)
         # decoder
         self.out_emb = nn.Linear(hidden_size, vocab_size, bias=True)
@@ -142,7 +133,7 @@ class Generator(nn.Module):
                                       hidden_size=hidden_size,
                                       nb_heads=nb_heads,
                                       **kargs)
-        self.nb_layers = nb_layers
+        self.nb_layers = nb_layers_gen
 
     def forward(self, h):
         for _ in range(self.nb_layers):
@@ -155,10 +146,9 @@ class Generator(nn.Module):
 class Discriminator(nn.Module):
 
     def __init__(self, vocab_size, batch_size, hidden_size,
-                 nb_heads, nb_layers, block_size, **kargs):
+                 nb_heads, nb_layers_disc, block_size, **kargs):
         nn.Module.__init__(self)
         # decoder
-        ## NO COTEXTUAL LOSS
         #self.out_emb = nn.Linear(hidden_size, block_size, bias=False)
         self.out_emb = nn.Linear(hidden_size, 1, bias=True)
         # transformer layers
@@ -167,11 +157,24 @@ class Discriminator(nn.Module):
                                       hidden_size=hidden_size,
                                       nb_heads=nb_heads,
                                       **kargs)
-        self.act_module = AdaptiveComputationTime(
-            batch_size, block_size,
-            hidden_size, **kargs)
+        self.nb_layers = nb_layers_disc
+        if self.nb_layers != -1:
+            self.act_module = AdaptiveComputationTime(
+                batch_size, block_size,
+                hidden_size, **kargs)
+            self.forward = self.forward_act
+        else:
+            self.forward = self.forward_no_act
 
-    def forward(self, h, pad_h):
+    def forward_no__act(self, h, pad_h):
+        for _ in range(self.nb_layers):
+            h = self.layer(h)  # B x M x H
+        # decoder
+        h = self.out_emb(h)
+        out = torch.sigmoid(h)
+        return h, out
+
+    def forward_act(self, h, pad_h):
         # init act
         self.act_module.init_act(pad_h)
         self.layer.attn.norm_span = 0.

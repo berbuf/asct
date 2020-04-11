@@ -56,11 +56,17 @@ PARAMS_CONFIG_SMALL = {
             'help': 'inner hidden size of FF layer',
             'dest': 'inner_hidden_size'
         },
-        '--nlayers': {
+        '--nlayers-gen': {
             'type': int,
-            'default': -1,
+            'default': 3,
             'help': 'number of layers for generator',
-            'dest': 'nb_layers'
+            'dest': 'nb_layers_gen'
+        },
+        '--nlayers-disc': {
+            'type': int,
+            'default': 12,
+            'help': 'number of layers for discriminator (no act)',
+            'dest': 'nb_layers_disc'
         },
         '--block-sz': {
             'type': int,
