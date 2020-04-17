@@ -6,7 +6,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-#from revnet import ReversibleBlock, ReversibleSequence
 from asa import AutoSelectAttention
 from act import AdaptiveComputationTime
 
@@ -19,10 +18,10 @@ class SelfAttention(nn.Module):
     """ self-attention with selective attention """
 
     def __init__(self, hidden_size, dropout,
-                 nb_heads, block_size, span, **kargs):
+                 nb_heads, block_size, **kargs):
         nn.Module.__init__(self)
         self.dropout = nn.Dropout(dropout)
-        self.select = AutoSelectAttention(L=span)
+        self.select = AutoSelectAttention(M=block_size)
 
     def forward(self, span, value):
         """ light attention implementation """ 
@@ -33,7 +32,9 @@ class SelfAttention(nn.Module):
         #attn = self.dropout(attn)
         # project to inner dim
         value = self.select.repeat_val(value)
-        out = torch.matmul(attn, value)        
+        #print (attn.shape)
+        #print (value.shape)
+        out = torch.matmul(attn, value)
         return out
 
 class MultiHeadSelfAttention(nn.Module):
@@ -48,7 +49,7 @@ class MultiHeadSelfAttention(nn.Module):
             nb_heads=nb_heads, **kargs)
         self.proj_out = nn.Linear(hidden_size, hidden_size, bias=False)
         self.proj_val = nn.Linear(hidden_size, hidden_size, bias=False)
-        self.proj_span = nn.Linear(hidden_size, 3 * nb_heads, bias=False)
+        self.proj_span = nn.Linear(hidden_size, 2*nb_heads, bias=False)
         # loss term span
         self.norm_span = 0.
 
@@ -67,7 +68,7 @@ class MultiHeadSelfAttention(nn.Module):
         D = self.head_dim
         M = h.size(1)
 
-        span = self.head_reshape(self.proj_span(h), 3)
+        span = self.head_reshape(self.proj_span(h), 2)
         value = self.head_reshape(self.proj_val(h),
                                   self.head_dim)
 

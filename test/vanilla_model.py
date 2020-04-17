@@ -79,7 +79,8 @@ class SeqAttention(nn.Module):
         # compute the effect of position embedding
         attn_pos = torch.matmul(query, key_pe)  # B x M x L_pos
         #print (attn_cont.shape, attn_pos.shape)
-        attn = attn_cont + attn_pos
+        B,M,_=attn_pos.size()
+        attn = attn_cont + attn_pos[:,:,:M]
 
         attn = attn / math.sqrt(self.hidden_size)  # B x M X L_pos
         attn = F.softmax(attn, dim=-1)

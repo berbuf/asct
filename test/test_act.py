@@ -1,113 +1,84 @@
+import time
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
-class AdaptiveComputationTime(nn.Module):
+from vanilla_model import TransformerSeqLayer as SeqLayer
+from models import FeedForwardLayer
+from act import AdaptiveComputationTime
 
-    def __init__(self, block_size, hidden_size,
-                 dup_batch_size, **kargs):
-        nn.Module.__init__(self)
-        self.p = nn.Linear(hidden_size, 1).cuda()
-        self.sigma = nn.Sigmoid()
-        self.threshold = .99
+device=3
+torch.cuda.set_device(device)
 
-    def init_batch(self, h):
-        B,M,H=h.size()
-        # final distribution on weights
-        self.weighted_h = torch.zeros(B, M, H).cuda()
-        self.acc_p = torch.zeros(B, M, 1).cuda()
-        # N and remainder
-        self.updates = 0
-        self.remainders = torch.zeros(B, M, 1).cuda()
-        # global mask
-        self.run = torch.ones(B, M, 1).bool().cuda()
-        # helper for masks
-        self.index_run = torch.arange(B*M).reshape(B, M, 1).cuda()
-        self.unpack_weights = torch.zeros(B, M, H).cuda()
-        self.align = torch.arange(M).cuda()
+torch.manual_seed(42)
+torch.cuda.manual_seed_all(42)
 
-    def unpack(self, x, unpack_mask):
-        """
-        restore x to batch dimension
-        with zero token in place of exit tokens
-        [[C, C, C], => [[Z, C, C, Z, C]
-         [C, E, E]]     [Z, Z, Z, Z, C]]
-        C: Continue, E: Exit, Z: Zero 
-        """
-        _,_,H=x.size()
-        # to do pad with pad token
-        self.unpack_weights.fill_(0)
-        sum_ = unpack_mask.sum(1).view(-1)
-        max_ = sum_.max()
-        pack_mask = (-self.align[:max_] + (sum_).unsqueeze(1))
-        pack_mask = pack_mask.clamp(0, 1).bool()
-        (self.unpack_weights.view(-1, H)
-         .index_copy_(0,
-                      self.index_run[unpack_mask],
-                      x[pack_mask]))
-        return self.unpack_weights
+iter=64
+N=12
 
-    def pack(self, x, unpack_mask):
-        """
-        left pack x to minimal dimension
-        and pad with zero token
-        [[E, C, C, E, C]  => [[C, C, C],
-         [E, E, E, E, C]]     [C, Z, Z]]
-        C: Continue, E: Exit, Z: Zero 
-        """
-        B,M,H=x.size()
-        sum_ = unpack_mask.sum(1)
-        max_ = sum_.max()
-        pad = max_ - sum_.min()
-        add_mask = (self.align[:pad] + 1 -
-                    (sum_ - max_ + pad))
-        add_mask = add_mask.clamp(0, 1).bool()
-        pad_mask = torch.cat((unpack_mask.squeeze(), add_mask), 1)
-        # to do pad with pad token
-        x = F.pad(x, (0, 0, 0, pad))
-        x = x[pad_mask].reshape(B, max_, H).contiguous()
-        return x
+def std_layer(B,M,H,K,V,L):
+    emb = torch.nn.Embedding(V, H).cuda()
+    X = torch.arange(B*M).reshape(B,M).cuda() % V
 
-    def forward(self, h):
-        """ layer-wise act with left packing h """
-        # unpack to full batch
-        h = self.unpack(h, self.run)
-        # exit probability
-        p = self.sigma(self.p(h)) * self.run
-        self.acc_p += p
-        # masks
-        mask_continue = (self.acc_p < self.threshold) * self.run
-        mask_exit = (~mask_continue) * self.run
-        # current p or remainder
-        p = p * mask_continue + (1 - (self.acc_p - p)) * mask_exit
-        # ensure distribution on weighted_h
-        self.weighted_h = (
-            h * p +
-            self.weighted_h * (1 - p)
-        )
-        # update containers
-        self.run *= mask_continue
-        self.remainders += p * mask_exit
-        self.updates += 1
-        # left pack h
-        h = self.pack(h, self.run)
-        return h
+    layer = SeqLayer(H, **{"inner_hidden_size": H*2, "dropout": .1, "nb_heads":K }).cuda()
+    key_pe = torch.nn.Parameter(torch.randn(1, H//K, M)).cuda()
 
-    def loss(self):
-        """ minimize number of updates and remaining probability """
-        return self.updates, self.remainders
+    start = time.time()
+    for _ in range(iter):
+        
+        h = emb(X)
+        for _ in range(N):    
+            h = layer(h, key_pe)
+        h = h.detach()
 
-def test():
-    #B,M,H=64,512,1024
-    torch.cuda.set_device(3)
-    B,M,H=2,10,3
-    x = torch.FloatTensor(B, M, H).uniform_(0, 10).float().cuda()
-    act = AdaptiveComputationTime(M, H, B)
-    act.init_batch(x)
-    while M > 0:
-        x = act(x)
-        x.uniform_(0, 10)
-        _,M,_=x.size()
-        print (M)
+    end = time.time()
+    print ("no_act", end - start)
+    
+def act_layer(B,M,H,K,V,L):
 
-test()
+    emb = torch.nn.Embedding(V, H).cuda()
+    X = torch.arange(B*M).reshape(B,M).cuda() % V
+
+    act = AdaptiveComputationTime(B,M,H,0.99).cuda()
+    layer = SeqLayer(H, **{"inner_hidden_size": H*2, "dropout": .1, "nb_heads":K }).cuda()
+    key_pe = torch.nn.Parameter(torch.randn(1, H//K, M)).cuda()
+
+    pad_idx = torch.tensor([0]).cuda()
+
+    start = time.time()
+    for _ in range(iter):
+        h = emb(X)
+
+        pad_h = emb(pad_idx)[0]
+        act.init_act(pad_h)
+
+        for i in range(N):    
+            print (h.shape)
+            B,M,H=h.size()
+            if not M:
+                break
+            h = layer(h, key_pe)
+
+            d=1/(i+1)
+            h = act(h, d*.8)
+        print ()
+        h = h.detach()
+
+    end = time.time()
+    print ("act", end - start)
+
+
+B,M,H,K,L=1,512,512,8,32
+V=1000
+D=H//K
+
+act_layer(B,M,H,K,V,L=-1)
+
+"""
+for M in [512, 1024, 2048, 4096]:
+
+    for H in [128, 256, 512, 1024]:
+        print ("M:{}, H:{}, K:{}".format(M,H,K))
+        std_layer(B,M,H,K,V,L=-1)
+        act_layer(B,M,H,K,V,L=-1)
+            
+"""
+

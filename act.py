@@ -9,9 +9,7 @@ class AdaptiveComputationTime(nn.Module):
                  hidden_size, threshold, **kargs):
         nn.Module.__init__(self)
         B,M,H=batch_size, block_size, hidden_size
-        # parrallel !!!
-        #B = B // 4
-        self.p = nn.Linear(H, 1).cuda()
+        self.p = nn.Linear(H, 1)
         self.sigma = nn.Sigmoid()
         self.threshold = .99        
         # global variables
@@ -26,6 +24,12 @@ class AdaptiveComputationTime(nn.Module):
         self.weighted_h = torch.zeros(B, M, H).cuda()
         self.acc_p = torch.zeros(B, M, 1).cuda()
         self.remainders = torch.zeros(B, M, 1).cuda()
+        # power of 2
+        self.m2, e = [], 0
+        while 2**e < M:
+            e += 1
+            self.m2 += [2**e] # sorted power of 2
+        self.m2 = torch.tensor(self.m2).cuda()
 
     def init_act(self, pad_h):
         # pad vector
@@ -45,6 +49,10 @@ class AdaptiveComputationTime(nn.Module):
         self.exit_.zero_()
         self.run.fill_(True)
 
+    def round_batch(self, max_):
+        max_ = self.m2[(self.m2 < max_).sum()] # round to power of 2  
+        return max_
+
     def unpack(self, x, unpack_mask):
         """
         restore x to batch dimension
@@ -54,15 +62,15 @@ class AdaptiveComputationTime(nn.Module):
         C: Continue, E: Exit, Z: Zero 
         """
         B,M,H=self.unpack_h.size()
-        # to do pad with pad token
         sum_ = unpack_mask.sum(1).view(-1)
         max_ = sum_.max()
+        max_ = self.round_batch(max_)
         pack_mask = (-self.align[:max_] + sum_.unsqueeze(1))
         pack_mask = pack_mask.clamp(0, 1).bool()
         return (self.unpack_h.view(-1, H)
                 .index_copy(0,
                             self.index_run[unpack_mask],
-                            x[pack_mask]).view(B, M, H))
+                            x[pack_mask]).view(B, M, H))#.contiguous()
 
     def pad_(self, x, pad_n):
         """
@@ -85,24 +93,25 @@ class AdaptiveComputationTime(nn.Module):
         B,M,H=x.size()
         sum_ = unpack_mask.sum(1)
         max_ = sum_.max()
+        max_ = self.round_batch(max_)
         pad = max_ - sum_.min()
         if pad:
             add_mask = (self.align[:pad] + 1 -
                         (sum_ - max_ + pad))
             add_mask = add_mask.clamp(0, 1).bool()
-            pad_mask = torch.cat((unpack_mask.squeeze(), add_mask), 1)
+            pad_mask = torch.cat((unpack_mask.view(B,-1), add_mask), 1)
             x = self.pad_(x, pad)
             x = x[pad_mask].reshape(B, max_, H).contiguous()
         else:
-            x = x[unpack_mask.squeeze()].reshape(B, max_, H).contiguous()
+            x = x[unpack_mask.view(B, -1)].reshape(B, max_, H).contiguous()
         return x
 
-    def forward(self, h):
+    def forward(self, h, coeff):
         """ layer-wise act with left packing h """
         # unpack to full batch
         h = self.unpack(h, self.run)
         # exit probability
-        p = self.sigma(self.p(h)) * self.run
+        p = self.sigma(self.p(h)) * coeff * self.run
         # masks
         mask_continue = (self.acc_p + p < self.threshold) * self.run
         mask_exit = (~mask_continue) * self.run
@@ -121,5 +130,4 @@ class AdaptiveComputationTime(nn.Module):
         self.exit_ = self.exit_ + self.updates * mask_exit
         # left pack h
         h = self.pack(h, self.run)
-        #print (self.run.sum(1))
         return h
