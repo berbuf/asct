@@ -31,7 +31,7 @@ class SelfAttention(nn.Module):
         attn = F.softmax(attn, dim=-1)
         #attn = self.dropout(attn)
         # project to inner dim
-        value = self.select.repeat_val(value)
+        value = self.select.repeat_val(value, attn)
         #print (attn.shape)
         #print (value.shape)
         out = torch.matmul(attn, value)

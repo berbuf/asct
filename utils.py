@@ -7,6 +7,26 @@ import argparse
 import torch
 from adagrad_with_grad_clip import AdagradWithGradClip
 
+##############################################################################
+# UTILITIES
+##############################################################################
+
+def get_r2(M):
+    r2, e = [0], 0
+    while 2**e < M:
+        e += 1
+        # sorted power of 2
+        r2 += [2**e]
+    return torch.tensor(r2)
+
+def round_r2(r2, v):
+    # round to power of 2
+    return r2[(r2 < v).sum()] 
+
+##############################################################################
+# ARGS
+##############################################################################
+
 def _parse_args(params_config, args):
     parser = argparse.ArgumentParser()
     for params_category in params_config:  # e.g., 'model_params'
