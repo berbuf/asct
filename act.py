@@ -93,8 +93,9 @@ class AdaptiveComputationTime(nn.Module):
         if not pad:
             return x[unpack_mask.view(B, -1)].reshape(B, max_, H)#.contiguous()
         add_mask = (self.align[:pad] + 1 -
-                    (sum_ - max_ + pad))
+                    (sum_ - max_ + pad).unsqueeze(1))
         add_mask = add_mask.clamp(0, 1).byte()#.bool()
+        #print ("\t\t", unpack_mask.view(B,-1).shape, add_mask.shape)
         pad_mask = torch.cat((unpack_mask.view(B,-1), add_mask), 1)
         x = self.pad_(x, pad)
         return x[pad_mask].reshape(B, max_, H)#.contiguous()

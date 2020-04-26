@@ -26,7 +26,7 @@ class AutoSelectAttention(nn.Module):
         B,M,H=val.size()
         _,_,L,_=attn.size()
         pad_h = self.pad_h.repeat(1, L, 1) # repeat pad_h
-        val = torch.cat((pad_h, val, pad_h), dim=1) # PAD vector
+        val = torch.cat((pad_h, val, pad_h), dim=1) # PAD vector        
         val = val.reshape(B, M//L+2, 1, L, H) # Split by L blocks
         val = val.repeat(1, 1, 3, 1, 1) # Repeat blocks 3 times
         val = torch.cat((val[:,range(M//L),2],
@@ -40,10 +40,10 @@ class AutoSelectAttention(nn.Module):
         return maximum span in left or right direction
         round to a power of two
         """
-        L = (mean.abs() + variance.abs()).max().ceil()#.int() # pdf > 80%
-        L = round_r2(self.r2, L*2) # pdf > 99%
-        if L * 4 > M: # don't over expand
-            L = M // 4
+        L = (mean.abs() + variance.abs()).max().ceil() * 2 + 1 # pdf > 99%
+        L = round_r2(self.r2, L).int()
+        if L > M:
+            L = M
         return L
 
     def forward(self, span):
@@ -60,7 +60,6 @@ class AutoSelectAttention(nn.Module):
         L = self.get_maximum_direction(M, mean, variance)
         x = self.x[self.M//2 - L*2 : self.M//2 + L*2] # 4L
         y = -((x + mean) / (variance + 1e-5))**2 # B x M x 4L
-        #y = x.reshape(1, 1, len(x)).repeat(y.shape[0], y.shape[1], 1)
         S = M // L # Number of Blocks
         y = y.reshape(B, S, -1) # B x S x L(4L)
         y = y[:,:,1:-L+1] # B x S x L(4L) - L

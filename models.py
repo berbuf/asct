@@ -32,8 +32,6 @@ class SelfAttention(nn.Module):
         #attn = self.dropout(attn)
         # project to inner dim
         value = self.select.repeat_val(value, attn)
-        #print (attn.shape)
-        #print (value.shape)
         out = torch.matmul(attn, value)
         return out
 
