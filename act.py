@@ -11,22 +11,23 @@ class AdaptiveComputationTime(nn.Module):
         nn.Module.__init__(self)
         B,M,H=batch_size, block_size, hidden_size
         self.p = nn.Linear(H, 1)
+        self.p.bias.data.fill_(-1.) # force initial low p
         self.sigma = nn.Sigmoid()
-        self.threshold = .99        
+        self.threshold = threshold
         # global variables
         self.updates = 0
-        self.exit_ = torch.zeros(B, M, 1).float()#.cuda()
-        self.run = torch.ones(B, M, 1).byte()#.cuda()
+        #self.exit_ = torch.zeros(B, M, 1).float().cuda()
+        self.run = torch.ones(B, M, 1).bool().cuda()
         # helper
-        self.index_run = torch.arange(B*M).reshape(B, M, 1)#.cuda()
-        self.align = torch.arange(M)#.cuda()
+        self.index_run = torch.arange(B*M).reshape(B, M, 1).cuda()
+        self.align = torch.arange(M).cuda()
         # buffer
-        self.unpack_h = torch.zeros(B, M, H)#.cuda()
-        self.weighted_h = torch.zeros(B, M, H)#.cuda()
-        self.acc_p = torch.zeros(B, M, 1)#.cuda()
-        self.remainders = torch.zeros(B, M, 1)#.cuda()
+        self.unpack_h = torch.zeros(B, M, H).cuda()
+        self.weighted_h = torch.zeros(B, M, H).cuda()
+        self.acc_p = torch.zeros(B, M, 1).cuda()
+        self.remainders = torch.zeros(B, M, 1).cuda()
         # power of 2
-        self.r2 = get_r2(M)#.cuda()
+        self.r2 = get_r2(M).cuda()
 
     def init_act(self, pad_h):
         # pad vector
@@ -43,8 +44,12 @@ class AdaptiveComputationTime(nn.Module):
         self.remainders.zero_()
         # zero variables
         self.updates = 0
-        self.exit_.zero_()
+        #self.exit_.zero_()
         self.run.fill_(True)
+
+    def get_remainders(self):
+        mask_continue = (self.acc_p < self.threshold) * self.run
+        return self.remainders + (1 - self.acc_p) * mask_continue
 
     def stats_mask(self, mask):
         sum_ = mask.sum(1).view(-1)
@@ -63,7 +68,7 @@ class AdaptiveComputationTime(nn.Module):
         B,M,H=self.unpack_h.size()
         sum_, max_ = self.stats_mask(unpack_mask)
         pack_mask = (-self.align[:max_] + sum_.unsqueeze(1))
-        pack_mask = pack_mask.clamp(0, 1).byte()#.bool()
+        pack_mask = pack_mask.clamp(0, 1).bool()
         return (self.unpack_h.view(-1, H)
                 .index_copy(0,
                             self.index_run[unpack_mask],
@@ -94,34 +99,33 @@ class AdaptiveComputationTime(nn.Module):
             return x[unpack_mask.view(B, -1)].reshape(B, max_, H)#.contiguous()
         add_mask = (self.align[:pad] + 1 -
                     (sum_ - max_ + pad).unsqueeze(1))
-        add_mask = add_mask.clamp(0, 1).byte()#.bool()
-        #print ("\t\t", unpack_mask.view(B,-1).shape, add_mask.shape)
+        add_mask = add_mask.clamp(0, 1).bool()
         pad_mask = torch.cat((unpack_mask.view(B,-1), add_mask), 1)
         x = self.pad_(x, pad)
         return x[pad_mask].reshape(B, max_, H)#.contiguous()
 
-    def forward(self, h, coeff):
+    def forward(self, h):
         """ layer-wise act with left packing h """
         # unpack to full batch
         h = self.unpack(h, self.run)
         # exit probability
-        p = self.sigma(self.p(h)) * coeff * self.run.float()
+        p = self.sigma(self.p(h)) * self.run
         # masks
         mask_continue = (self.acc_p + p < self.threshold) * self.run
         mask_exit = (~mask_continue) * self.run
         # current p or remainder
-        update = p * mask_continue.float() + (1 - self.acc_p) * mask_exit.float()
+        update = p * mask_continue + (1 - self.acc_p) * mask_exit
         # ensure distribution on weighted_h
         self.weighted_h = (
             h * update +
-            self.weighted_h# * (1 - update)
+            self.weighted_h# * (1 - update) ## ??
         )
         # update containers
         self.run = self.run * mask_continue
-        self.acc_p = self.acc_p + update * mask_continue.float()
-        self.remainders = self.remainders + (1 - self.acc_p) * mask_exit.float()
+        self.acc_p = self.acc_p + update * mask_continue
+        self.remainders = self.remainders + (1 - self.acc_p) * mask_exit
         self.updates += 1
-        self.exit_ = self.exit_ + self.updates * mask_exit.float()
+        #self.exit_ = self.exit_ + self.updates * mask_exit
         # left pack h
         h = self.pack(h, self.run)
         return h

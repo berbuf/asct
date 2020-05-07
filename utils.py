@@ -13,7 +13,7 @@ from adagrad_with_grad_clip import AdagradWithGradClip
 
 def get_r2(M):
     r2, e = [0], 0
-    while 2**e < M:
+    while 2**e <= M:
         e += 1
         # sorted power of 2
         r2 += [2**e]
@@ -66,10 +66,6 @@ def _torch_distributed_init_process_group(local_rank):
 
 def set_up_env(env_params):
     assert torch.cuda.is_available()
-    if env_params['distributed']:
-        env_params.update(
-            _torch_distributed_init_process_group(
-                local_rank=env_params['local_rank']))
     torch.cuda.set_device(env_params['device_num'])
     env_params['device'] = torch.device('cuda')
 
@@ -124,8 +120,7 @@ def get_optimizer_and_scheduler(model, optim_params):
 # CHECKPOINT
 ##############################################################################
 
-def _load_checkpoint(checkpoint_path, model, optimizer, scheduler, logger,
-                     distributed):
+def _load_checkpoint(checkpoint_path, model, optimizer, distributed):
     print('loading from a checkpoint at {}'.format(checkpoint_path))
     if distributed:
         # the model is saved from gpu0 so we need to map it to CPU first
@@ -136,48 +131,37 @@ def _load_checkpoint(checkpoint_path, model, optimizer, scheduler, logger,
     iter_init = checkpoint_state['iter_no'] + 1  # next iteration
     model.load_state_dict(checkpoint_state['model'])
     optimizer.load_state_dict(checkpoint_state['optimizer'])
-    logger.load_state_dict(checkpoint_state['logger'])
-    if 'scheduler_iter' in checkpoint_state:
-        # we only need the step count
-        scheduler.step(checkpoint_state['scheduler_iter'])
-    return iter_init
 
 def load_checkpoint(trainer_params, iter_no, model,
-                    optimizer, scheduler, logger,
-                    parallel):
+                    optimizer, parallel):
     checkpoint_path = trainer_params["checkpoint_path"]
     if checkpoint_path and os.path.exists(checkpoint_path):
-        path = "{}_{}_{}_{}".format(checkpoint_path,
-                                    trainer_params["loss_act"],
-                                    trainer_params["loss_asa"],
-                                    "p" if f else "np",
-                                    str(iter_no))
-        return _load_checkpoint(checkpoint_path=name,
-                                model=model,
-                                optimizer=optimizer,
-                                scheduler=scheduler,
-                                logger=logger,
-                                distributed=distributed)
-    return 0
+        path = "./checkpoint/{}.step_{}.act_{}.asa_{}.{}".format(checkpoint_path,
+                                                                 str(iter_no),
+                                                                 trainer_params["loss_act"],
+                                                                 trainer_params["loss_asa"],
+                                                                 "p" if f else "np")
+        _load_checkpoint(checkpoint_path=name,
+                         model=model,
+                         optimizer=optimizer,
+                         distributed=distributed)
 
-def save_checkpoint(trainer_params, main_params, iter_no):
+def save_checkpoint(trainer_params, model, optimizer, iter_no):
     checkpoint_path = trainer_params["checkpoint_path"]
     def parallel(f):
-        state_model = main_params["model"].module if f else main_params["model"]
+        state_model = model.module if f else model
         checkpoint_state = {
             'iter_no': iter_no,  # last completed iteration
             'model': state_model.state_dict(),
-            'logger': main_params["logger"].state_dict(),
-            'optimizer': main_params["optimizer"].state_dict(),
+            'optimizer': optimizer.state_dict(),
         }
-        if main_params["scheduler"] is not None:
-            checkpoint_state['scheduler_iter'] = main_params["scheduler"].last_epoch
-        path = "{}_{}_{}_{}".format(checkpoint_path,
-                                    trainer_params["loss_act"],
-                                    trainer_params["loss_asa"],
-                                    "p" if f else "np",
-                                    str(iter_no))
+        path = "./checkpoint/{}.step_{}.act_{}.asa_{}.{}".format(checkpoint_path,
+                                                                 str(iter_no),
+                                                                 trainer_params["loss_act"],
+                                                                 trainer_params["loss_asa"],
+                                                                 "p" if f else "np")
         torch.save(checkpoint_state, path)
+        print ("Saved", path)
     if checkpoint_path:
         #parallel(f=True)
         parallel(f=False)

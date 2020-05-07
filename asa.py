@@ -9,8 +9,8 @@ class AutoSelectAttention(nn.Module):
 
     def __init__(self, M):
         nn.Module.__init__(self)
-        self.x = (torch.arange(M) - M//2).float()#.cuda()
-        self.r2 = get_r2(M).float()#.cuda()
+        self.x = (torch.arange(M) - M//2).float().cuda()
+        self.r2 = get_r2(M).float().cuda()
         self.M = M
 
     def set_pad_h(self, pad_h):
@@ -40,10 +40,12 @@ class AutoSelectAttention(nn.Module):
         return maximum span in left or right direction
         round to a power of two
         """
-        L = (mean.abs() + variance.abs()).max().ceil() * 2 + 1 # pdf > 99%
+        L = (mean.abs() + variance.abs()).max().ceil() + 1# * 2 + 1 # pdf > 80%
+        if L > M//4:
+            L = M//4
         L = round_r2(self.r2, L).int()
-        if L > M:
-            L = M
+        if L == 0:
+            L = 2
         return L
 
     def forward(self, span):
@@ -58,6 +60,7 @@ class AutoSelectAttention(nn.Module):
         mean, variance = (span[:,:,0].unsqueeze(2),
                           span[:,:,1].unsqueeze(2))
         L = self.get_maximum_direction(M, mean, variance)
+        self.track_L = L
         x = self.x[self.M//2 - L*2 : self.M//2 + L*2] # 4L
         y = -((x + mean) / (variance + 1e-5))**2 # B x M x 4L
         S = M // L # Number of Blocks

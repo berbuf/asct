@@ -4,25 +4,12 @@ PARAMS_CONFIG_SMALL = {
 
     # env-specific
     'env_params': {
-        '--distributed': {
-            'action': 'store_true',
-            'default': False,
-            'help': 'enable distributed training.'
-                    '(otherwise will use all available GPUs with dataparallel)',
-            'dest': 'distributed'
-        },
-        '--local_rank': {
-            'type': int,
-            'default': 0,
-            'help': 'used in distributed training',
-            'dest': 'local_rank'
-        },
         '--device_num': {
             'type': int,
-            'default': 1,
+            'default': 2,
             'help': 'gpu num',
             'dest': 'device_num'
-        },
+        },        
     },
 
     # data-specific
@@ -44,6 +31,12 @@ PARAMS_CONFIG_SMALL = {
 
     # model-specific
     'model_params': {
+        '--vanilla': {
+            'type': bool,
+            'default': False,
+            'help': 'vanilla transformer',
+            'dest': 'vanilla'
+        },
         '--hid-sz': {
             'type': int,
             'default': 256,
@@ -56,21 +49,15 @@ PARAMS_CONFIG_SMALL = {
             'help': 'inner hidden size of FF layer',
             'dest': 'inner_hidden_size'
         },
-        '--nlayers-gen': {
-            'type': int,
-            'default': 3,
-            'help': 'number of layers for generator',
-            'dest': 'nb_layers_gen'
-        },
-        '--nlayers-disc': {
+        '--nlayers': {
             'type': int,
             'default': 12,
-            'help': 'number of layers for discriminator (no act)',
-            'dest': 'nb_layers_disc'
+            'help': 'number of layers',
+            'dest': 'nb_layers'
         },
         '--block-sz': {
             'type': int,
-            'default': 2048,
+            'default': 4096,
             'help': 'block size '
                     '(the length of sequence to process in parallel)',
             'dest': 'block_size'
@@ -87,13 +74,6 @@ PARAMS_CONFIG_SMALL = {
             'help': 'dropout rate of ReLU and attention',
             'dest': 'dropout'
         },
-        '--rev-net': {
-            'action': 'store_true',
-            'default': False,
-            'help': 'activate reversible network '
-                    'to avoid storing gradients',
-            'dest': 'rev_net'
-        },
         '--threshold_act': {
             'type': float,
             'default': .99,
@@ -106,7 +86,7 @@ PARAMS_CONFIG_SMALL = {
     'optim_params': {
         '--lr': {
             'type': float,
-            'default': 0.03,
+            'default': 0.01,
             'help': 'learning rate',
             'dest': 'lr'
         },
@@ -147,66 +127,35 @@ PARAMS_CONFIG_SMALL = {
             'help': 'batch size',
             'dest': 'batch_size'
         },
-        '--batch-split': {
-            'type': int,
-            'default': 1,
-            'help': 'split a batch into smaller parts to fit in GPU memory',
-            'dest': 'batch_split'
-        },
-        '--nbatches': {
-            'type': int,
-            'default': 1000,
-            'help': 'number of batches in each iteration',
-            'dest': 'nb_batches_per_iter'
-        },
-        '--niter': {
-            'type': int,
-            'default': 1000,
-            'help': 'number of iterations to train',
-            'dest': 'nb_iter'
-        },
-        '--checkpoint': {
-            'type': str,
-            'default': 'checkpoint/small',
-            'help': 'path to save/load model',
-            'dest': 'checkpoint_path'
-        },
         '--last_iter': {
             'type': int,
             'default': 0,
             'help': '',
             'dest': 'last_iter'
         },
-        '--full-eval-mode': {
-            'action': 'store_true',
-            'default': False,
-            'help': 'do evaluation on the whole validation and the test data',
-            'dest': 'full_eval_mode'
+        '--niter': {
+            'type': int,
+            'default': 100,
+            'help': 'number of iterations to train',
+            'dest': 'nb_iter'
+        },
+        '--checkpoint': {
+            'type': str,
+            'default': 'IMDB',
+            'help': 'path to save/load info model',
+            'dest': 'checkpoint_path'
         },
         "--loss_act": {
             'type': float,
-            'default': .01,
+            'default': 0.0001,
             'help': '',
             'dest': 'loss_act'
         },
         "--loss_asa": {
             'type': float,
-            'default': .01,
+            'default': 0.4,
             'help': '',
             'dest': 'loss_asa'
-        },
-        "--loss_gen": {
-            'type': float,
-            'default': .5,
-            'help': '',
-            'dest': 'loss_gen'
-        },
-        '--context_loss_scale': {
-            'type': float,
-            'default': .2,
-            'help': 'scale (std dev) parameter '
-                    'for contextual loss',
-            'dest': 'context_loss_scale'
         },
     },
 }
