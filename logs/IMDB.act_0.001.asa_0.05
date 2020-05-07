@@ -1,0 +1,102 @@
+Eval:False, Step:0  , Acc:0.5479  , L:0.6856  , Asa:0.0725  , Act:0.1303  , Updates:5.7049
+act: 4096.0 4096.0 223.4 63.4 9.1 1.4 0.1 0.0 0.0 0.0 0.0
+asa: 2.0 4.0 4.0 3.1 2.1 2.0 2.1 2.0 2.0 2.0 2.0
+Eval:True , Step:0  , Acc:0.5293  , L:0.6874  , Asa:0.0301  , Act:0.0992  , Updates:5.2013
+act: 4096.0 4096.0 268.0 104.0 9.6 0.1 0.0
+asa: 2.0 4.0 3.9 2.2 2.0 2.0 2.0
+Eval:False, Step:1  , Acc:0.6169  , L:0.651   , Asa:0.1803  , Act:0.2868  , Updates:8.1163
+act: 4096.0 3308.1 1259.9 1117.0 966.5 814.0 661.9 498.1 354.3 201.1 92.5 37.7
+asa: 8.5 17.9 14.6 8.9 6.0 5.7 5.5 5.3 5.7 5.6 5.4 4.7
+Eval:True , Step:1  , Acc:0.6043  , L:0.6571  , Asa:0.2927  , Act:0.4034  , Updates:9.0195
+act: 4096.0 2644.8 1579.3 1564.2 1552.0 1523.7 1461.4 1310.2 879.9 0.0
+asa: 32.0 32.0 16.1 8.6 4.4 2.2 2.0 2.0 2.0 2.0
+Eval:False, Step:2  , Acc:0.5027  , L:0.6934  , Asa:0.6896  , Act:0.9879  , Updates:1.165
+act: 4096.0 53.3 25.3 25.0 24.9 24.6 23.9 22.7 19.2 10.9 3.5 0.3
+asa: 83.2 41.7 29.5 11.8 6.1 3.9 2.5 2.0 2.0 2.0 2.0 2.0
+Eval:True , Step:2  , Acc:0.4979  , L:0.6933  , Asa:0.061   , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 43.8
+Eval:False, Step:3  , Acc:0.5038  , L:0.6935  , Asa:0.078   , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 42.2
+Eval:True , Step:3  , Acc:0.4979  , L:0.6932  , Asa:0.0686  , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 40.3
+Eval:False, Step:4  , Acc:0.5042  , L:0.6935  , Asa:0.0767  , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 40.6
+Eval:True , Step:4  , Acc:0.4979  , L:0.6933  , Asa:0.0572  , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 39.5
+Eval:False, Step:5  , Acc:0.5039  , L:0.6934  , Asa:0.0747  , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 39.5
+Eval:True , Step:5  , Acc:0.4979  , L:0.6933  , Asa:0.0225  , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 38.8
+Eval:False, Step:6  , Acc:0.5036  , L:0.6934  , Asa:0.0604  , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 36.0
+Eval:True , Step:6  , Acc:0.4979  , L:0.6933  , Asa:0.1016  , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 31.6
+Eval:False, Step:7  , Acc:0.5035  , L:0.6934  , Asa:0.066   , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 31.9
+Eval:True , Step:7  , Acc:0.4979  , L:0.6933  , Asa:0.0559  , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 31.4
+Eval:False, Step:8  , Acc:0.5041  , L:0.6935  , Asa:0.0702  , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 31.8
+Eval:True , Step:8  , Acc:0.4979  , L:0.6933  , Asa:0.0136  , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 31.3
+Eval:False, Step:9  , Acc:0.5034  , L:0.6934  , Asa:0.075   , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 31.7
+Eval:True , Step:9  , Acc:0.4979  , L:0.6933  , Asa:0.0288  , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 31.2
+Eval:False, Step:10 , Acc:0.5033  , L:0.6934  , Asa:0.0691  , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 31.7
+Eval:True , Step:10 , Acc:0.4979  , L:0.6933  , Asa:0.1348  , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 31.4
+Eval:False, Step:11 , Acc:0.5033  , L:0.6934  , Asa:0.0662  , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 31.7
+Eval:True , Step:11 , Acc:0.4979  , L:0.6933  , Asa:0.0387  , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 31.2
+Eval:False, Step:12 , Acc:0.5036  , L:0.6934  , Asa:0.0667  , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 31.7
+Eval:True , Step:12 , Acc:0.4979  , L:0.6933  , Asa:0.0771  , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 31.3
+Eval:False, Step:13 , Acc:0.5035  , L:0.6934  , Asa:0.0733  , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 31.7
+Eval:True , Step:13 , Acc:0.4979  , L:0.6933  , Asa:0.0714  , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 31.3
+Eval:False, Step:14 , Acc:0.5041  , L:0.6934  , Asa:0.0692  , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 31.7
+Eval:True , Step:14 , Acc:0.4979  , L:0.6933  , Asa:0.0515  , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 31.3
+Eval:False, Step:15 , Acc:0.5039  , L:0.6934  , Asa:0.0641  , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 31.7
+Eval:True , Step:15 , Acc:0.4979  , L:0.6933  , Asa:0.0193  , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 31.2
+Eval:False, Step:16 , Acc:0.5041  , L:0.6935  , Asa:0.075   , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 31.6
+Eval:True , Step:16 , Acc:0.4979  , L:0.6933  , Asa:0.0451  , Act:1.0     , Updates:1.0  
+act: 4096.0
+asa: 31.3
